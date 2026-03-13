@@ -26,7 +26,6 @@ export function PlayerSidebar() {
     outgoingTreaty,
     peaceMemories,
     reinforcementRequest,
-    reinforcementCooldowns,
     sendReinforcementRequest
   } = useGameStore(
     useShallow((state) => ({
@@ -47,7 +46,6 @@ export function PlayerSidebar() {
       outgoingTreaty: state.outgoingTreaty,
       peaceMemories: state.peaceMemories,
       reinforcementRequest: state.reinforcementRequest,
-      reinforcementCooldowns: state.reinforcementCooldowns,
       sendReinforcementRequest: state.sendReinforcementRequest
     }))
   );
@@ -131,11 +129,6 @@ export function PlayerSidebar() {
 
           const awaitingReinforcements = reinforcementRequest?.fromPlayerId === humanPlayerId &&
             reinforcementRequest?.toPlayerId === player.id;
-          const reinforcementCooldownKey = humanPlayerId ? `${humanPlayerId}:${player.id}` : "";
-          const lastReinforcementTurn = reinforcementCooldowns[reinforcementCooldownKey] ?? null;
-          const reinforcementOnCooldown = humanPlayerId
-            ? (lastReinforcementTurn !== null && turnNumber - lastReinforcementTurn < 4)
-            : true;
           const canCallReinforcements = isAtPeace &&
             !isSelf &&
             isVisible &&
