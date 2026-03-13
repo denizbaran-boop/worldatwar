@@ -1,0 +1,10 @@
+[
+  {
+    "type": "console.error",
+    "text": "The result of getSnapshot should be cached to avoid an infinite loop"
+  },
+  {
+    "type": "pageerror",
+    "text": "Error: Maximum update depth exceeded. This can happen when a component repeatedly calls setState inside componentWillUpdate or componentDidUpdate. React limits the number of nested updates to prevent infinite loops."
+  }
+]
