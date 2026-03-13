@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   onPlay: () => void;
@@ -21,6 +22,7 @@ type Explosion = {
 let _nextId = 0;
 
 export function LandingHero({ onPlay }: Props) {
+  const { t } = useTranslation();
   const [explosions, setExplosions] = useState<Explosion[]>([]);
 
   useEffect(() => {
@@ -85,13 +87,13 @@ export function LandingHero({ onPlay }: Props) {
 
         {/* Content on top */}
         <div className="relative z-10">
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Global Command Protocol</p>
-          <h1 className="mt-5 text-6xl font-black tracking-wide text-cyan-100 md:text-7xl">World at War</h1>
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">{t.landing.tagline}</p>
+          <h1 className="mt-5 text-6xl font-black tracking-wide text-cyan-100 md:text-7xl">{t.landing.title}</h1>
           <p className="mx-auto mt-5 max-w-xl text-base text-slate-300 md:text-lg">
-            Command your color. Expand your territory. Dominate the world.
+            {t.landing.subtitle}
           </p>
           <div className="mt-10 flex justify-center">
-            <Button onClick={onPlay} className="px-12 py-3 text-lg">Play</Button>
+            <Button onClick={onPlay} className="px-12 py-3 text-lg">{t.landing.play}</Button>
           </div>
         </div>
       </Card>

@@ -8,8 +8,10 @@ import { useGameStore } from "@/store/gameStore";
 import { UNIT_STATS } from "@/lib/game/unitSystem";
 import { GameBoard } from "./GameBoard";
 import { StarfieldCanvas } from "./StarfieldCanvas";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 export function WorldMap() {
+  const { t } = useTranslation();
   const MIN_ZOOM = 0.45;
   const MAX_ZOOM = 4;
   const [zoom, setZoom] = useState(1);
@@ -183,34 +185,34 @@ export function WorldMap() {
 
         <div className="absolute right-3 top-3 flex items-center gap-2 rounded-md border border-border bg-panel/90 px-2 py-2">
           <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => setZoom((current) => clampZoom(Number((current - 0.1).toFixed(2))))}>
-            Zoom -
+            {t.worldMap.zoomOut}
           </Button>
           <span className="min-w-12 text-center text-xs text-slate-300">{Math.round(zoom * 100)}%</span>
           <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => setZoom((current) => clampZoom(Number((current + 0.1).toFixed(2))))}>
-            Zoom +
+            {t.worldMap.zoomIn}
           </Button>
         </div>
 
         <div className="absolute bottom-3 left-3 rounded-md border border-border bg-panel/90 px-3 py-2 text-xs text-slate-200">
           {info ? (
             <>
-              <div>Tile: {info.coord}</div>
+              <div>{t.worldMap.tileLabel} {info.coord}</div>
               {info.discovered ? (
                 <>
-                  <div className="capitalize">Owner: {info.owner}</div>
-                  <div>Capital: {info.isCapital ? "Yes" : "No"}</div>
-                  <div>City: {info.hasVillage ? "Yes" : "No"}</div>
-                  <div>Gold Mine: {info.hasGoldMine ? "Yes" : "No"}</div>
-                  <div>Unit: {info.unitName}</div>
-                  <div>Unit HP: {info.unitHealth}</div>
-                  <div>Moved this turn: {info.unitMoved}</div>
+                  <div className="capitalize">{t.worldMap.ownerLabel} {info.owner}</div>
+                  <div>{t.worldMap.capitalLabel} {info.isCapital ? t.worldMap.yes : t.worldMap.no}</div>
+                  <div>{t.worldMap.cityLabel} {info.hasVillage ? t.worldMap.yes : t.worldMap.no}</div>
+                  <div>{t.worldMap.goldMineLabel} {info.hasGoldMine ? t.worldMap.yes : t.worldMap.no}</div>
+                  <div>{t.worldMap.unitLabel} {info.unitName}</div>
+                  <div>{t.worldMap.unitHpLabel} {info.unitHealth}</div>
+                  <div>{t.worldMap.movedThisTurn} {info.unitMoved}</div>
                 </>
               ) : (
-                <div>Undiscovered terrain</div>
+                <div>{t.worldMap.undiscovered}</div>
               )}
             </>
           ) : (
-            <div>Hover or select a tile to inspect.</div>
+            <div>{t.worldMap.hoverInspect}</div>
           )}
         </div>
       </div>

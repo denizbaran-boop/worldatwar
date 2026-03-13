@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { COLOR_HEX } from "@/lib/game/constants";
 import type { LogEntry, Player, PlayerColor } from "@/lib/game/types";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   logs: LogEntry[];
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function GameLog({ logs, players, contactedPlayerIds, humanPlayerId }: Props) {
+  const { t } = useTranslation();
   // Colors belonging to players the human hasn't met yet
   const unknownColors = new Set<PlayerColor>(
     players
@@ -43,16 +45,16 @@ export function GameLog({ logs, players, contactedPlayerIds, humanPlayerId }: Pr
 
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Log</p>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{t.log.title}</p>
       <div ref={scrollContainerRef} className="mt-3 flex-1 space-y-4 overflow-auto pr-1">
         {logs.length === 0 && (
-          <p className="text-xs text-slate-700">No activity yet.</p>
+          <p className="text-xs text-slate-700">{t.log.noActivity}</p>
         )}
         {grouped.map(({ turn, entries }) => (
           <div key={turn}>
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">
-                Round {turn}
+                {t.log.round} {turn}
               </span>
               <div className="h-px flex-1 bg-slate-800" />
             </div>

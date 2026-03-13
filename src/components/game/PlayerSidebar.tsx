@@ -6,8 +6,10 @@ import { COLOR_HEX, GOLD_MINE_TURN_GOLD, VILLAGE_TURN_GOLD } from "@/lib/game/co
 import { getDiplomacyPairKey } from "@/lib/game/diplomacy";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 export function PlayerSidebar() {
+  const { t } = useTranslation();
   const {
     players,
     currentPlayerId,
@@ -82,7 +84,7 @@ export function PlayerSidebar() {
           left: left.color,
           right: right.color,
           icon: isPeace ? "☮" : atWar ? "⚔" : "○",
-          label: isPeace ? "PEACE" : atWar ? "WAR" : "NEUTRAL",
+          label: isPeace ? t.sidebar.statusPeace : atWar ? t.sidebar.statusWar : t.sidebar.statusNeutral,
           tone: isPeace ? "text-emerald-300" : atWar ? "text-rose-300" : "text-slate-300"
         });
       }
@@ -93,15 +95,15 @@ export function PlayerSidebar() {
 
   return (
     <Card className="p-4">
-      <h3 className="text-lg font-bold text-white">Players</h3>
+      <h3 className="text-lg font-bold text-white">{t.sidebar.players}</h3>
       <div className="mt-3 space-y-2">
         {players.map((player) => {
           const isSelf = player.id === humanPlayerId;
           const isVisible = humanPlayerId === null || isSelf || contactedPlayerIds.includes(player.id);
 
           const isAtPeace = humanPlayerId !== null && peaceTreaties.some(
-            (t) => (t.playerA === humanPlayerId && t.playerB === player.id) ||
-                   (t.playerA === player.id && t.playerB === humanPlayerId)
+            (treaty) => (treaty.playerA === humanPlayerId && treaty.playerB === player.id) ||
+                   (treaty.playerA === player.id && treaty.playerB === humanPlayerId)
           );
 
           const awaitingResponse = outgoingTreaty?.toPlayerId === player.id;
@@ -142,9 +144,9 @@ export function PlayerSidebar() {
               <div key={player.id} className="rounded-md border border-border bg-panel2 px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-600" />
-                  <span className="text-slate-400">???</span>
+                  <span className="text-slate-400">{t.sidebar.unknown}</span>
                 </div>
-                <div className="mt-1 text-xs text-slate-500">Unknown faction</div>
+                <div className="mt-1 text-xs text-slate-500">{t.sidebar.unknownFaction}</div>
               </div>
             );
           }
@@ -161,25 +163,25 @@ export function PlayerSidebar() {
                 <div className="flex items-center gap-2">
                   <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLOR_HEX[player.color], boxShadow: `0 0 8px ${COLOR_HEX[player.color]}` }} />
                   <span className="capitalize">{player.color}</span>
-                  {aiPlayerIds.includes(player.id) && <span className="text-[10px] uppercase tracking-wide text-cyan-300">AI</span>}
-                  {!player.isAlive && <span className="text-[10px] uppercase tracking-wide text-rose-400">Eliminated</span>}
-                  {isAtPeace && <span className="text-[10px] uppercase tracking-wide text-emerald-300">☮ Peace</span>}
+                  {aiPlayerIds.includes(player.id) && <span className="text-[10px] uppercase tracking-wide text-cyan-300">{t.sidebar.ai}</span>}
+                  {!player.isAlive && <span className="text-[10px] uppercase tracking-wide text-rose-400">{t.sidebar.eliminated}</span>}
+                  {isAtPeace && <span className="text-[10px] uppercase tracking-wide text-emerald-300">{t.sidebar.peace}</span>}
                 </div>
               </div>
-              <div className="mt-1 text-xs text-slate-300">Tiles: {tileCount}</div>
-              <div className="text-xs text-slate-300">Units: {unitCount}</div>
-              <div className="text-xs text-slate-300">Cities: {villageCount}</div>
-              <div className="text-xs text-slate-300">Mines: {mineCount}</div>
-              <div className="text-xs text-amber-300">Gold: {player.gold}</div>
-              <div className="text-xs text-emerald-300">Income: +{income}/turn</div>
+              <div className="mt-1 text-xs text-slate-300">{t.sidebar.tiles} {tileCount}</div>
+              <div className="text-xs text-slate-300">{t.sidebar.units} {unitCount}</div>
+              <div className="text-xs text-slate-300">{t.sidebar.cities} {villageCount}</div>
+              <div className="text-xs text-slate-300">{t.sidebar.mines} {mineCount}</div>
+              <div className="text-xs text-amber-300">{t.sidebar.gold} {player.gold}</div>
+              <div className="text-xs text-emerald-300">{t.sidebar.income}{income}{t.sidebar.incomeSuffix}</div>
               {awaitingResponse && (
                 <div className="mt-2 w-full rounded border border-yellow-600/40 bg-yellow-900/15 px-2 py-1 text-center text-[11px] text-yellow-300/80">
-                  ⏳ Awaiting response…
+                  {t.sidebar.awaitingResponse}
                 </div>
               )}
               {!awaitingResponse && peaceOnCooldown && !isAtPeace && (
                 <div className="mt-2 w-full rounded border border-slate-700/50 bg-slate-900/30 px-2 py-1 text-center text-[11px] text-slate-400">
-                  Diplomacy cooling down
+                  {t.sidebar.diplomacyCooldown}
                 </div>
               )}
               {canSendTreaty && (
@@ -187,7 +189,7 @@ export function PlayerSidebar() {
                   onClick={() => sendPeaceTreaty(player.id)}
                   className="mt-2 w-full rounded border border-emerald-600/50 bg-emerald-900/20 px-2 py-1 text-[11px] text-emerald-300 transition hover:bg-emerald-900/40"
                 >
-                  Send Peace Treaty
+                  {t.sidebar.sendPeaceTreaty}
                 </button>
               )}
               {canBreakPeace && (
@@ -195,12 +197,12 @@ export function PlayerSidebar() {
                   onClick={() => breakPeaceTreaty(player.id)}
                   className="mt-2 w-full rounded border border-rose-600/50 bg-rose-900/20 px-2 py-1 text-[11px] text-rose-300 transition hover:bg-rose-900/40"
                 >
-                  Break Peace Treaty
+                  {t.sidebar.breakPeaceTreaty}
                 </button>
               )}
               {awaitingReinforcements && (
                 <div className="mt-2 w-full rounded border border-sky-600/40 bg-sky-900/15 px-2 py-1 text-center text-[11px] text-sky-300/80">
-                  ⏳ Awaiting reinforcements…
+                  {t.sidebar.awaitingReinforcements}
                 </div>
               )}
               {canCallReinforcements && (
@@ -208,7 +210,7 @@ export function PlayerSidebar() {
                   onClick={() => sendReinforcementRequest(player.id)}
                   className="mt-2 w-full rounded border border-sky-600/50 bg-sky-900/20 px-2 py-1 text-[11px] text-sky-300 transition hover:bg-sky-900/40"
                 >
-                  Call for Reinforcements
+                  {t.sidebar.callReinforcements}
                 </button>
               )}
             </div>
@@ -217,7 +219,7 @@ export function PlayerSidebar() {
       </div>
 
       <div className="mt-5 border-t border-border/60 pt-4">
-        <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Diplomacy Status</h4>
+        <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">{t.sidebar.diplomacyStatus}</h4>
         <div className="mt-3 space-y-2">
           {diplomacyRows.length > 0 ? diplomacyRows.map((row) => (
             <div key={row.key} className="flex items-center justify-between rounded-md border border-border bg-panel2 px-3 py-2 text-sm">
@@ -227,7 +229,7 @@ export function PlayerSidebar() {
             </div>
           )) : (
             <div className="rounded-md border border-border bg-panel2 px-3 py-2 text-xs text-slate-400">
-              No active faction relationships yet.
+              {t.sidebar.noRelationships}
             </div>
           )}
         </div>

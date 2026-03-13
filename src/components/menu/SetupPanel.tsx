@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { COLOR_HEX, PLAYER_COLORS } from "@/lib/game/constants";
 import type { AIDifficulty, GameMode, MapSize, PlayerColor } from "@/lib/game/types";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   playerCount: number;
@@ -39,16 +40,17 @@ export function SetupPanel({
   onBack,
   onStartMatch
 }: Props) {
+  const { t } = useTranslation();
   const availableColors = useMemo(() => PLAYER_COLORS, []);
 
   return (
     <Card className="w-full max-w-2xl border-slate-700/60 bg-slate-950/65 p-7 shadow-[0_0_60px_rgba(8,47,73,0.35)]">
-      <h2 className="text-2xl font-bold text-white">Start a Game</h2>
-      <p className="mt-2 text-sm text-slate-300">Configure local match settings before deployment.</p>
+      <h2 className="text-2xl font-bold text-white">{t.setup.title}</h2>
+      <p className="mt-2 text-sm text-slate-300">{t.setup.subtitle}</p>
 
       <div className="mt-6 grid gap-5">
         <div className="flex flex-col gap-2">
-          <span className="text-sm text-slate-300">Game Mode</span>
+          <span className="text-sm text-slate-300">{t.setup.gameMode}</span>
           <div className="flex gap-2">
             <button
               onClick={() => onGameModeChange("pvp")}
@@ -58,7 +60,7 @@ export function SetupPanel({
                   : "border-slate-600 text-slate-300 hover:border-slate-400"
               }`}
             >
-              Player vs Player
+              {t.setup.pvp}
             </button>
             <button
               onClick={() => onGameModeChange("pvai")}
@@ -68,14 +70,14 @@ export function SetupPanel({
                   : "border-slate-600 text-slate-300 hover:border-slate-400"
               }`}
             >
-              Player vs AI
+              {t.setup.pvai}
             </button>
           </div>
         </div>
 
         {gameMode === "pvai" ? (
           <div className="flex flex-col gap-2">
-            <span className="text-sm text-slate-300">Number of AI Opponents</span>
+            <span className="text-sm text-slate-300">{t.setup.aiOpponents}</span>
             <div className="flex gap-2">
               {[1, 2, 3, 4].map((count) => {
                 const active = aiCount === count;
@@ -94,7 +96,7 @@ export function SetupPanel({
                         <span key={i} className="text-base leading-none">🤖</span>
                       ))}
                     </div>
-                    <span className="text-xs font-medium">{count} AI{count > 1 ? "s" : ""}</span>
+                    <span className="text-xs font-medium">{count} {count > 1 ? t.setup.aiUnits : t.setup.aiUnit}</span>
                   </button>
                 );
               })}
@@ -102,7 +104,7 @@ export function SetupPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <span className="text-sm text-slate-300">Number of Players</span>
+            <span className="text-sm text-slate-300">{t.setup.numPlayers}</span>
             <div className="flex gap-2">
               {[2, 3, 4, 5].map((count) => {
                 const active = playerCount === count;
@@ -117,7 +119,7 @@ export function SetupPanel({
                     }`}
                   >
                     <span className="text-lg font-bold leading-none">{count}</span>
-                    <span className="text-[11px]">Players</span>
+                    <span className="text-[11px]">{t.setup.players}</span>
                   </button>
                 );
               })}
@@ -127,7 +129,7 @@ export function SetupPanel({
 
         {gameMode === "pvai" && (
           <div className="flex flex-col gap-2">
-            <span className="text-sm text-slate-300">AI Difficulty</span>
+            <span className="text-sm text-slate-300">{t.setup.aiDifficulty}</span>
             <style>{`
               @keyframes flame-flicker {
                 0%,100% { box-shadow: 0 0 8px 2px rgba(251,146,60,.55), 0 0 22px 5px rgba(239,68,68,.25); }
@@ -153,7 +155,7 @@ export function SetupPanel({
               {([
                 {
                   value: "easy" as AIDifficulty,
-                  label: "Easy",
+                  label: t.setup.easy,
                   icon: "🌿",
                   activeClass: "border-green-500 bg-green-500/10 text-white",
                   inactiveClass: "border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200",
@@ -162,7 +164,7 @@ export function SetupPanel({
                 },
                 {
                   value: "normal" as AIDifficulty,
-                  label: "Normal",
+                  label: t.setup.normal,
                   icon: "⚡",
                   activeClass: "border-yellow-500 bg-yellow-500/10 text-white",
                   inactiveClass: "border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200",
@@ -171,7 +173,7 @@ export function SetupPanel({
                 },
                 {
                   value: "hard" as AIDifficulty,
-                  label: "Hard",
+                  label: t.setup.hard,
                   icon: "🔥",
                   activeClass: "border-orange-500 bg-orange-500/10 text-white",
                   inactiveClass: "border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200",
@@ -197,12 +199,12 @@ export function SetupPanel({
         )}
 
         <div className="flex flex-col gap-2">
-          <span className="text-sm text-slate-300">Map Size</span>
+          <span className="text-sm text-slate-300">{t.setup.mapSize}</span>
           <div className="flex items-end gap-3">
             {([
-              { value: "small" as MapSize, label: "Small", radius: 2, hexSize: 5 },
-              { value: "medium" as MapSize, label: "Medium", radius: 3, hexSize: 5 },
-              { value: "large" as MapSize, label: "Large", radius: 4, hexSize: 5 },
+              { value: "small" as MapSize, label: t.setup.small, radius: 2, hexSize: 5 },
+              { value: "medium" as MapSize, label: t.setup.medium, radius: 3, hexSize: 5 },
+              { value: "large" as MapSize, label: t.setup.large, radius: 4, hexSize: 5 },
             ]).map(({ value, label, radius, hexSize }) => {
               const active = mapSize === value;
               const colSpacing = hexSize * 1.5;
@@ -267,7 +269,7 @@ export function SetupPanel({
         </div>
 
         <div>
-          <p className="text-sm text-slate-300">Your Color (Player One)</p>
+          <p className="text-sm text-slate-300">{t.setup.yourColor}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {availableColors.map((color) => {
               const active = localPlayerColor === color;
@@ -289,8 +291,8 @@ export function SetupPanel({
       </div>
 
       <div className="mt-8 flex gap-2">
-        <Button variant="secondary" onClick={onBack}>Back</Button>
-        <Button onClick={onStartMatch}>Start Match</Button>
+        <Button variant="secondary" onClick={onBack}>{t.setup.back}</Button>
+        <Button onClick={onStartMatch}>{t.setup.startMatch}</Button>
       </div>
     </Card>
   );

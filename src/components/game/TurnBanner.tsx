@@ -1,6 +1,9 @@
+"use client";
+
 import { COLOR_HEX } from "@/lib/game/constants";
 import type { Player } from "@/lib/game/types";
 import { Card } from "@/components/ui/Card";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   currentPlayer: Player | null;
@@ -8,9 +11,10 @@ type Props = {
 };
 
 export function TurnBanner({ currentPlayer, aiThinking = false }: Props) {
+  const { t } = useTranslation();
   return (
     <Card className="p-4">
-      <div className="text-sm uppercase tracking-wide text-slate-400">Active Commander</div>
+      <div className="text-sm uppercase tracking-wide text-slate-400">{t.turnBanner.activeCommander}</div>
       {currentPlayer && (
         <div className="mt-2 flex items-center gap-2">
           <span
@@ -18,7 +22,7 @@ export function TurnBanner({ currentPlayer, aiThinking = false }: Props) {
             style={{ backgroundColor: COLOR_HEX[currentPlayer.color], boxShadow: `0 0 10px ${COLOR_HEX[currentPlayer.color]}` }}
           />
           <span className="text-base font-semibold text-slate-100 capitalize">{currentPlayer.color}</span>
-          {aiThinking && <span className="text-xs uppercase tracking-wide text-cyan-300">AI Thinking...</span>}
+          {aiThinking && <span className="text-xs uppercase tracking-wide text-cyan-300">{t.turnBanner.aiThinking}</span>}
         </div>
       )}
     </Card>

@@ -8,6 +8,7 @@ import { UNIT_IMAGE } from "@/lib/game/unitAssets";
 import { UNIT_PROGRESSION, UNIT_STATS } from "@/lib/game/unitSystem";
 import { findTileByKey, isTileOccupied } from "@/lib/game/actions";
 import { useGameStore } from "@/store/gameStore";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 export function CityProductionPanel() {
   const {
@@ -63,6 +64,7 @@ export function CityProductionPanel() {
     });
   }, [currentPlayer]);
 
+  const { t } = useTranslation();
   const visible = isCityTile && !gameOver && currentPlayer && !aiTurnInProgress;
 
   return (
@@ -76,11 +78,11 @@ export function CityProductionPanel() {
           <div className="flex items-center justify-between border-b border-slate-800/70 px-5 py-2.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
-                {selectedTile?.isCapital ? "Capital" : "City"} · Production
+                {selectedTile?.isCapital ? t.cityProduction.capital : t.cityProduction.city}{t.cityProduction.production}
               </span>
               {tileOccupied && (
                 <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-semibold text-red-300">
-                  Tile occupied
+                  {t.cityProduction.tileOccupied}
                 </span>
               )}
             </div>
@@ -144,7 +146,7 @@ export function CityProductionPanel() {
                         ? "bg-amber-500/20 text-amber-300"
                         : "bg-red-500/15 text-red-400"
                   }`}>
-                    {!isUnlocked ? "Locked" : `${stats.productionCost}g`}
+                    {!isUnlocked ? t.cityProduction.locked : `${stats.productionCost}g`}
                   </span>
 
                   {/* stats row */}

@@ -6,9 +6,11 @@ import { UNIT_STATS } from "@/lib/game/unitSystem";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 export function ActionPanel() {
   const router = useRouter();
+  const { t } = useTranslation();
   const {
     currentPlayer,
     selectedTileKey,
@@ -57,38 +59,38 @@ export function ActionPanel() {
 
   return (
     <Card className="p-4">
-      <h3 className="text-lg font-bold text-white">Actions</h3>
-      <p className="mt-2 text-xs text-slate-400">Exploration now happens only by unit movement. Select a unit, then click a destination tile.</p>
+      <h3 className="text-lg font-bold text-white">{t.actionPanel.actions}</h3>
+      <p className="mt-2 text-xs text-slate-400">{t.actionPanel.hint}</p>
 
       {selectedUnit && (
         <div className="mt-3 rounded-md border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
-          Selected: {UNIT_STATS[selectedUnit.type].name} | Move range: {UNIT_STATS[selectedUnit.type].movementRange} | Moved: {selectedUnit.hasMovedThisTurn ? "Yes" : "No"}
+          {t.actionPanel.selectedPrefix} {UNIT_STATS[selectedUnit.type].name} | {t.actionPanel.moveRangeLabel} {UNIT_STATS[selectedUnit.type].movementRange} | {t.actionPanel.movedLabel} {selectedUnit.hasMovedThisTurn ? t.actionPanel.yes : t.actionPanel.no}
         </div>
       )}
 
       {peaceBroken && (
         <div className="mt-3 rounded-md border border-rose-500/40 bg-rose-900/20 px-3 py-2 text-xs text-rose-300">
-          Peace broken — no further actions this turn. End your turn to continue.
+          {t.actionPanel.peaceBroken}
         </div>
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button variant="secondary" disabled={gameOver || actionAnimationBusy} onClick={() => toggleTechTree(true)}>Tech Tree</Button>
+        <Button variant="secondary" disabled={gameOver || actionAnimationBusy} onClick={() => toggleTechTree(true)}>{t.actionPanel.techTree}</Button>
         <Button variant="secondary" disabled={gameOver || actionAnimationBusy || peaceBroken || !selectedUnit || selectedUnit.hasMovedThisTurn || !selectedTileKey} onClick={() => {
           if (!selectedUnit || !selectedTileKey) return;
           queueAnimatedUnitAction(selectedUnit.id, selectedTileKey);
         }}>
-          Move / Attack To Selected Tile
+          {t.actionPanel.moveAttack}
         </Button>
         {canHeal && (
           <Button variant="secondary" onClick={() => {
             if (!selectedUnit) return;
             healUnit(selectedUnit.id);
           }}>
-            Heal +1 HP
+            {t.actionPanel.heal}
           </Button>
         )}
-        <Button disabled={gameOver || actionAnimationBusy} onClick={endTurn}>End Turn</Button>
+        <Button disabled={gameOver || actionAnimationBusy} onClick={endTurn}>{t.actionPanel.endTurn}</Button>
         <Button
           variant="danger"
           onClick={() => {
@@ -96,7 +98,7 @@ export function ActionPanel() {
             router.push("/");
           }}
         >
-          Finish Game
+          {t.actionPanel.finishGame}
         </Button>
       </div>
 

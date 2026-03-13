@@ -9,6 +9,7 @@ import { UNIT_STATS } from "@/lib/game/unitSystem";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 // Canvas dimensions and layout
 const GRAPH_WIDTH = 1600;
@@ -49,6 +50,7 @@ export function TechTreeModal() {
   const [isDragging, setIsDragging] = useState(false);
   const [treeZoom, setTreeZoom] = useState(DEFAULT_ZOOM);
 
+  const { t } = useTranslation();
   const { open, toggleTechTree, player, unlockTech, gameOver, actionAnimationBusy } = useGameStore(
     useShallow((state) => ({
       open: state.techTreeOpen,
@@ -138,24 +140,24 @@ export function TechTreeModal() {
         {/* Header */}
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-slate-800 bg-[#04070e]/95 px-6 py-4 backdrop-blur">
           <div className="flex items-center gap-4">
-            <h3 className="text-xl font-bold text-white">Tech Tree</h3>
+            <h3 className="text-xl font-bold text-white">{t.techTree.title}</h3>
             <div className="flex items-center gap-3 text-xs text-slate-400">
-              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.ground}} /> Ground</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.air}} /> Air</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.defense}} /> Defense</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.ground}} /> {t.techTree.ground}</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.air}} /> {t.techTree.air}</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.defense}} /> {t.techTree.defense}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">{Math.round(treeZoom * 100)}%</span>
-            <span className="rounded-md border border-amber-400/45 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200">Gold: {player.gold}</span>
-            <Button variant="secondary" onClick={() => toggleTechTree(false)}>Close</Button>
+            <span className="rounded-md border border-amber-400/45 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200">{t.techTree.goldLabel} {player.gold}</span>
+            <Button variant="secondary" onClick={() => toggleTechTree(false)}>{t.techTree.close}</Button>
           </div>
         </div>
 
         <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           {/* Graph panel */}
           <div className="flex min-h-0 flex-col rounded-xl border border-slate-800 bg-[radial-gradient(circle_at_center,#0f172a_0%,#020617_65%)] p-3">
-            <p className="mb-2 text-xs text-slate-400">Scroll to zoom · Drag to pan · Click a node to unlock</p>
+            <p className="mb-2 text-xs text-slate-400">{t.techTree.hint}</p>
             <div
               ref={graphScrollRef}
               className={`min-h-0 flex-1 overflow-auto rounded-lg border border-slate-700/70 ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
@@ -299,7 +301,7 @@ export function TechTreeModal() {
                           {/* Status badge */}
                           <div className="absolute inset-x-0 top-[18%] flex justify-center">
                             <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] ${badgeClass}`}>
-                              {node.unlocked ? "Unlocked" : node.available ? (node.affordable ? "Ready" : "Need Gold") : "Locked"}
+                              {node.unlocked ? t.techTree.unlocked : node.available ? (node.affordable ? t.techTree.ready : t.techTree.needGold) : t.techTree.locked}
                             </span>
                           </div>
                           {/* Cost */}
@@ -334,12 +336,12 @@ export function TechTreeModal() {
           {/* Side panel */}
           <div className="min-h-0 overflow-auto rounded-xl border border-slate-800 bg-[#020617]/80 p-3">
             <div className="mb-3 rounded-lg border border-slate-700/70 bg-slate-900/60 p-3 text-xs text-slate-300">
-              Three branches from the center. Unlock units to deploy them from cities.
+              {t.techTree.branchInfo}
             </div>
             {(["ground", "air", "defense"] as const).map((branch) => {
               const branchNodes = nodes.filter((n) => n.branch === branch || (branch === "ground" && n.branch === "center"));
               const color = BRANCH_COLOR[branch];
-              const label = branch === "ground" ? "Ground" : branch === "air" ? "Air" : "Defense";
+              const label = branch === "ground" ? t.techTree.ground : branch === "air" ? t.techTree.air : t.techTree.defense;
               return (
                 <div key={branch} className="mb-4">
                   <div className="mb-2 flex items-center gap-2">

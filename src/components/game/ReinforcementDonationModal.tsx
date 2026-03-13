@@ -8,10 +8,12 @@ import { UNIT_PROGRESSION, UNIT_STATS } from "@/lib/game/unitSystem";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
 import type { DonationEntry, UnitType } from "@/lib/game/types";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 const MAX_UNITS = 5;
 
 export function ReinforcementDonationModal() {
+  const { t } = useTranslation();
   const {
     players,
     currentPlayerId,
@@ -75,10 +77,10 @@ export function ReinforcementDonationModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <Card className="w-full max-w-md p-6">
-        <h2 className="text-xl font-bold text-white">Send Reinforcements</h2>
+        <h2 className="text-xl font-bold text-white">{t.reinforcement.title}</h2>
         <p className="mt-1 text-sm text-slate-300">
-          Sending to <span className="capitalize font-semibold text-sky-300">{reinforcementRequest!.fromColor}</span>.
-          You pay the gold cost.
+          {t.reinforcement.sendingTo} <span className="capitalize font-semibold text-sky-300">{reinforcementRequest!.fromColor}</span>.{" "}
+          {t.reinforcement.youPay}
         </p>
 
         <div className="mt-4 space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -94,7 +96,7 @@ export function ReinforcementDonationModal() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-white truncate">{stats.name}</div>
-                  <div className="text-xs text-amber-300">{stats.productionCost}g each</div>
+                  <div className="text-xs text-amber-300">{stats.productionCost}{t.reinforcement.eachSuffix}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -120,11 +122,11 @@ export function ReinforcementDonationModal() {
 
         <div className="mt-4 flex items-center justify-between rounded-md border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm">
           <span className="text-slate-300">
-            Units: <span className={totalUnits === MAX_UNITS ? "text-rose-400 font-bold" : "text-white font-bold"}>{totalUnits}/{MAX_UNITS}</span>
+            {t.reinforcement.unitsLabel} <span className={totalUnits === MAX_UNITS ? "text-rose-400 font-bold" : "text-white font-bold"}>{totalUnits}/{MAX_UNITS}</span>
           </span>
           <span className="text-amber-300">
-            Cost: <span className="font-bold">{totalCost}g</span>
-            <span className="ml-2 text-slate-400">(have {donor.gold}g)</span>
+            {t.reinforcement.costLabel} <span className="font-bold">{totalCost}g</span>
+            <span className="ml-2 text-slate-400">({t.reinforcement.havePrefix} {donor.gold}g)</span>
           </span>
         </div>
 
@@ -134,13 +136,13 @@ export function ReinforcementDonationModal() {
             disabled={totalUnits === 0}
             className="flex-1 rounded-md border border-sky-600/50 bg-sky-900/30 py-2 text-sm font-medium text-sky-300 hover:bg-sky-900/60 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Send ({totalUnits} unit{totalUnits !== 1 ? "s" : ""})
+            {t.reinforcement.sendPrefix} ({totalUnits} {totalUnits !== 1 ? t.reinforcement.units : t.reinforcement.unit})
           </button>
           <button
             onClick={handleCancel}
             className="flex-1 rounded-md border border-slate-600/50 bg-slate-800/30 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700/50 transition"
           >
-            Cancel
+            {t.reinforcement.cancel}
           </button>
         </div>
       </Card>
