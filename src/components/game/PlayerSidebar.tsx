@@ -1,0 +1,245 @@
+"use client";
+
+import { useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { COLOR_HEX, GOLD_MINE_TURN_GOLD, VILLAGE_TURN_GOLD } from "@/lib/game/constants";
+import { getDiplomacyPairKey } from "@/lib/game/diplomacy";
+import { Card } from "@/components/ui/Card";
+import { useGameStore } from "@/store/gameStore";
+
+export function PlayerSidebar() {
+  const {
+    players,
+    currentPlayerId,
+    humanPlayerId,
+    aiPlayerIds,
+    tiles,
+    villages,
+    units,
+    contactedPlayerIds,
+    factionContactPairs,
+    peaceTreaties,
+    lastCombatTurnByPair,
+    turnNumber,
+    sendPeaceTreaty,
+    breakPeaceTreaty,
+    outgoingTreaty,
+    peaceMemories,
+    reinforcementRequest,
+    reinforcementCooldowns,
+    sendReinforcementRequest
+  } = useGameStore(
+    useShallow((state) => ({
+      players: state.players,
+      currentPlayerId: state.currentPlayerId,
+      humanPlayerId: state.humanPlayerId,
+      aiPlayerIds: state.aiPlayerIds,
+      tiles: state.tiles,
+      villages: state.villages,
+      units: state.units,
+      contactedPlayerIds: state.contactedPlayerIds,
+      factionContactPairs: state.factionContactPairs,
+      peaceTreaties: state.peaceTreaties,
+      lastCombatTurnByPair: state.lastCombatTurnByPair,
+      turnNumber: state.turnNumber,
+      sendPeaceTreaty: state.sendPeaceTreaty,
+      breakPeaceTreaty: state.breakPeaceTreaty,
+      outgoingTreaty: state.outgoingTreaty,
+      peaceMemories: state.peaceMemories,
+      reinforcementRequest: state.reinforcementRequest,
+      reinforcementCooldowns: state.reinforcementCooldowns,
+      sendReinforcementRequest: state.sendReinforcementRequest
+    }))
+  );
+
+  const unitCountByPlayer = useMemo(() => {
+    const result = new Map<string, number>();
+    for (const unit of units) {
+      result.set(unit.ownerId, (result.get(unit.ownerId) ?? 0) + 1);
+    }
+    return result;
+  }, [units]);
+
+  const diplomacyRows = useMemo(() => {
+    const alivePlayers = players.filter((player) => player.isAlive);
+    const rows: Array<{ key: string; left: string; right: string; icon: string; label: string; tone: string }> = [];
+
+    for (let i = 0; i < alivePlayers.length; i += 1) {
+      for (let j = i + 1; j < alivePlayers.length; j += 1) {
+        const left = alivePlayers[i];
+        const right = alivePlayers[j];
+        const pairKey = [left.id, right.id].sort().join(":");
+        // Only show pairs where both factions have had first contact
+        if (!factionContactPairs.includes(pairKey)) continue;
+        const isPeace = peaceTreaties.some(
+          (entry) =>
+            (entry.playerA === left.id && entry.playerB === right.id) ||
+            (entry.playerA === right.id && entry.playerB === left.id)
+        );
+        const lastCombatTurn = lastCombatTurnByPair[pairKey];
+        const atWar = !isPeace && typeof lastCombatTurn === "number" && turnNumber - lastCombatTurn < 3;
+
+        rows.push({
+          key: pairKey,
+          left: left.color,
+          right: right.color,
+          icon: isPeace ? "☮" : atWar ? "⚔" : "○",
+          label: isPeace ? "PEACE" : atWar ? "WAR" : "NEUTRAL",
+          tone: isPeace ? "text-emerald-300" : atWar ? "text-rose-300" : "text-slate-300"
+        });
+      }
+    }
+
+    return rows;
+  }, [factionContactPairs, lastCombatTurnByPair, peaceTreaties, players, turnNumber]);
+
+  return (
+    <Card className="p-4">
+      <h3 className="text-lg font-bold text-white">Players</h3>
+      <div className="mt-3 space-y-2">
+        {players.map((player) => {
+          const isSelf = player.id === humanPlayerId;
+          const isVisible = humanPlayerId === null || isSelf || contactedPlayerIds.includes(player.id);
+
+          const isAtPeace = humanPlayerId !== null && peaceTreaties.some(
+            (t) => (t.playerA === humanPlayerId && t.playerB === player.id) ||
+                   (t.playerA === player.id && t.playerB === humanPlayerId)
+          );
+
+          const awaitingResponse = outgoingTreaty?.toPlayerId === player.id;
+          const peaceMemory = humanPlayerId ? peaceMemories[getDiplomacyPairKey(humanPlayerId, player.id)] : null;
+          const peaceOnCooldown = Boolean(
+            peaceMemory && (
+              (peaceMemory.lastOfferTurn !== null && turnNumber - peaceMemory.lastOfferTurn < 4) ||
+              (peaceMemory.lastRejectedTurn !== null && turnNumber - peaceMemory.lastRejectedTurn < 6) ||
+              (peaceMemory.lastBrokenTurn !== null && turnNumber - peaceMemory.lastBrokenTurn < 10)
+            )
+          );
+
+          const canSendTreaty = !isSelf &&
+            isVisible &&
+            player.isAlive &&
+            !isAtPeace &&
+            !outgoingTreaty &&  // one at a time
+            !peaceOnCooldown &&
+            humanPlayerId !== null &&
+            currentPlayerId === humanPlayerId;
+
+          const canBreakPeace = isAtPeace &&
+            humanPlayerId !== null &&
+            currentPlayerId === humanPlayerId;
+
+          const awaitingReinforcements = reinforcementRequest?.fromPlayerId === humanPlayerId &&
+            reinforcementRequest?.toPlayerId === player.id;
+          const reinforcementCooldownKey = humanPlayerId ? `${humanPlayerId}:${player.id}` : "";
+          const lastReinforcementTurn = reinforcementCooldowns[reinforcementCooldownKey] ?? null;
+          const reinforcementOnCooldown = humanPlayerId
+            ? (lastReinforcementTurn !== null && turnNumber - lastReinforcementTurn < 4)
+            : true;
+          const canCallReinforcements = isAtPeace &&
+            !isSelf &&
+            isVisible &&
+            player.isAlive &&
+            !reinforcementRequest &&
+            humanPlayerId !== null &&
+            currentPlayerId === humanPlayerId;
+
+          if (!isVisible) {
+            return (
+              <div key={player.id} className="rounded-md border border-border bg-panel2 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-600" />
+                  <span className="text-slate-400">???</span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">Unknown faction</div>
+              </div>
+            );
+          }
+
+          const tileCount = tiles.filter((tile) => tile.ownerId === player.id).length;
+          const unitCount = unitCountByPlayer.get(player.id) ?? 0;
+          const villageCount = villages.filter((village) => village.ownerId === player.id).length;
+          const mineCount = tiles.filter((tile) => tile.ownerId === player.id && tile.hasGoldMine).length;
+          const income = villageCount * VILLAGE_TURN_GOLD + mineCount * GOLD_MINE_TURN_GOLD;
+
+          return (
+            <div key={player.id} className={`rounded-md border px-3 py-2 transition ${player.id === currentPlayerId ? "border-cyan-400 bg-cyan-900/20" : "border-border bg-panel2"}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLOR_HEX[player.color], boxShadow: `0 0 8px ${COLOR_HEX[player.color]}` }} />
+                  <span className="capitalize">{player.color}</span>
+                  {aiPlayerIds.includes(player.id) && <span className="text-[10px] uppercase tracking-wide text-cyan-300">AI</span>}
+                  {!player.isAlive && <span className="text-[10px] uppercase tracking-wide text-rose-400">Eliminated</span>}
+                  {isAtPeace && <span className="text-[10px] uppercase tracking-wide text-emerald-300">☮ Peace</span>}
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-slate-300">Tiles: {tileCount}</div>
+              <div className="text-xs text-slate-300">Units: {unitCount}</div>
+              <div className="text-xs text-slate-300">Cities: {villageCount}</div>
+              <div className="text-xs text-slate-300">Mines: {mineCount}</div>
+              <div className="text-xs text-amber-300">Gold: {player.gold}</div>
+              <div className="text-xs text-emerald-300">Income: +{income}/turn</div>
+              {awaitingResponse && (
+                <div className="mt-2 w-full rounded border border-yellow-600/40 bg-yellow-900/15 px-2 py-1 text-center text-[11px] text-yellow-300/80">
+                  ⏳ Awaiting response…
+                </div>
+              )}
+              {!awaitingResponse && peaceOnCooldown && !isAtPeace && (
+                <div className="mt-2 w-full rounded border border-slate-700/50 bg-slate-900/30 px-2 py-1 text-center text-[11px] text-slate-400">
+                  Diplomacy cooling down
+                </div>
+              )}
+              {canSendTreaty && (
+                <button
+                  onClick={() => sendPeaceTreaty(player.id)}
+                  className="mt-2 w-full rounded border border-emerald-600/50 bg-emerald-900/20 px-2 py-1 text-[11px] text-emerald-300 transition hover:bg-emerald-900/40"
+                >
+                  Send Peace Treaty
+                </button>
+              )}
+              {canBreakPeace && (
+                <button
+                  onClick={() => breakPeaceTreaty(player.id)}
+                  className="mt-2 w-full rounded border border-rose-600/50 bg-rose-900/20 px-2 py-1 text-[11px] text-rose-300 transition hover:bg-rose-900/40"
+                >
+                  Break Peace Treaty
+                </button>
+              )}
+              {awaitingReinforcements && (
+                <div className="mt-2 w-full rounded border border-sky-600/40 bg-sky-900/15 px-2 py-1 text-center text-[11px] text-sky-300/80">
+                  ⏳ Awaiting reinforcements…
+                </div>
+              )}
+              {canCallReinforcements && (
+                <button
+                  onClick={() => sendReinforcementRequest(player.id)}
+                  className="mt-2 w-full rounded border border-sky-600/50 bg-sky-900/20 px-2 py-1 text-[11px] text-sky-300 transition hover:bg-sky-900/40"
+                >
+                  Call for Reinforcements
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 border-t border-border/60 pt-4">
+        <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Diplomacy Status</h4>
+        <div className="mt-3 space-y-2">
+          {diplomacyRows.length > 0 ? diplomacyRows.map((row) => (
+            <div key={row.key} className="flex items-center justify-between rounded-md border border-border bg-panel2 px-3 py-2 text-sm">
+              <span className="capitalize text-slate-200">{row.left}</span>
+              <span className={`px-2 text-base ${row.tone}`} title={row.label}>{row.icon}</span>
+              <span className="capitalize text-slate-200">{row.right}</span>
+            </div>
+          )) : (
+            <div className="rounded-md border border-border bg-panel2 px-3 py-2 text-xs text-slate-400">
+              No active faction relationships yet.
+            </div>
+          )}
+        </div>
+
+      </div>
+    </Card>
+  );
+}

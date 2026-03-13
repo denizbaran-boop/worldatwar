@@ -1,0 +1,379 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useShallow } from "zustand/react/shallow";
+import { ActionPanel } from "@/components/game/ActionPanel";
+import { CityProductionPanel } from "@/components/game/CityProductionPanel";
+import { GameLog } from "@/components/game/GameLog";
+import { PlayerSidebar } from "@/components/game/PlayerSidebar";
+import { ReinforcementDonationModal } from "@/components/game/ReinforcementDonationModal";
+import { TechTreeModal } from "@/components/game/TechTreeModal";
+import { TechTreePanel } from "@/components/game/TechTreePanel";
+import { TurnBanner } from "@/components/game/TurnBanner";
+import { WorldMap } from "@/components/game/WorldMap";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { useGameStore } from "@/store/gameStore";
+
+export function GamePageClient() {
+  const router = useRouter();
+  const {
+    players,
+    currentPlayerId,
+    aiPlayerIds,
+    aiTurnInProgress,
+    actionAnimationBusy,
+    runAITurn,
+    logs,
+    turnNumber,
+    ranking,
+    gameOver,
+    gameOverReason,
+    setup,
+    resetToMenu,
+    units,
+    tiles,
+    villages,
+    fogOfWar,
+    firstContactNotification,
+    dismissFirstContact,
+    diplomaticNotification,
+    dismissDiplomaticNotification,
+    treatyAcceptedNotification,
+    dismissTreatyAccepted,
+    pendingPeaceTreaty,
+    respondToPeaceTreaty,
+    reinforcementRequest,
+    respondToReinforcementRequest,
+    reinforcementNotification,
+    dismissReinforcementNotification,
+    contactedPlayerIds,
+    humanPlayerId,
+    diplomacyLog,
+    lastCombatTurnByPair
+  } = useGameStore(
+    useShallow((state) => ({
+      players: state.players,
+      currentPlayerId: state.currentPlayerId,
+      aiPlayerIds: state.aiPlayerIds,
+      aiTurnInProgress: state.aiTurnInProgress,
+      actionAnimationBusy: state.actionAnimationBusy,
+      runAITurn: state.runAITurn,
+      logs: state.logs,
+      turnNumber: state.turnNumber,
+      ranking: state.ranking,
+      gameOver: state.gameOver,
+      gameOverReason: state.gameOverReason,
+      setup: state.setup,
+      resetToMenu: state.resetToMenu,
+      units: state.units,
+      tiles: state.tiles,
+      villages: state.villages,
+      fogOfWar: state.fogOfWar,
+      firstContactNotification: state.firstContactNotification,
+      dismissFirstContact: state.dismissFirstContact,
+      diplomaticNotification: state.diplomaticNotification,
+      dismissDiplomaticNotification: state.dismissDiplomaticNotification,
+      treatyAcceptedNotification: state.treatyAcceptedNotification,
+      dismissTreatyAccepted: state.dismissTreatyAccepted,
+      pendingPeaceTreaty: state.pendingPeaceTreaty,
+      respondToPeaceTreaty: state.respondToPeaceTreaty,
+      reinforcementRequest: state.reinforcementRequest,
+      respondToReinforcementRequest: state.respondToReinforcementRequest,
+      reinforcementNotification: state.reinforcementNotification,
+      dismissReinforcementNotification: state.dismissReinforcementNotification,
+      contactedPlayerIds: state.contactedPlayerIds,
+      humanPlayerId: state.humanPlayerId,
+      diplomacyLog: state.diplomacyLog,
+      lastCombatTurnByPair: state.lastCombatTurnByPair
+    }))
+  );
+
+  const currentPlayer = useMemo(() => players.find((player) => player.id === currentPlayerId) ?? null, [players, currentPlayerId]);
+  const humanPlayer = useMemo(() => players.find((player) => player.id === humanPlayerId) ?? null, [players, humanPlayerId]);
+  const humanEliminated = Boolean(humanPlayerId && humanPlayer && !humanPlayer.isAlive && !gameOver);
+  const [watching, setWatching] = useState(false);
+  const currentPlayerIsAI = Boolean(currentPlayerId && aiPlayerIds.includes(currentPlayerId));
+
+  useEffect(() => {
+    (window as Window & { render_game_to_text?: () => string; advanceTime?: (ms: number) => void }).render_game_to_text = () =>
+      JSON.stringify({
+        note: "Axial coords with q rightward and r downward-right",
+        turnNumber,
+        currentPlayerId,
+        gameOver,
+        actionAnimationBusy,
+        matchInitialized: setup.matchInitialized,
+        mapSize: setup.mapSize,
+        players: players.map((player) => ({
+          id: player.id,
+          color: player.color,
+          gold: player.gold,
+          unlockedTechIds: player.unlockedTechIds
+        })),
+        diplomacyLog: diplomacyLog.map((entry) => ({
+          turn: entry.turn,
+          text: entry.text
+        })),
+        lastCombatTurnByPair,
+        units: units.map((unit) => ({
+          id: unit.id,
+          ownerId: unit.ownerId,
+          tileKey: unit.tileKey,
+          type: unit.type,
+          health: unit.health,
+          hasMovedThisTurn: unit.hasMovedThisTurn,
+          hasAttackedThisTurn: unit.hasAttackedThisTurn
+        })),
+        tiles: tiles.map((tile) => ({
+          key: tile.key,
+          ownerId: tile.ownerId,
+          isCapital: tile.isCapital,
+          hasGoldMine: tile.hasGoldMine,
+          villageId: tile.villageId
+        })),
+        villages: villages.map((village) => ({
+          id: village.id,
+          tileKey: village.tileKey,
+          ownerId: village.ownerId,
+          controlledTileCount: village.controlledTileKeys.length
+        })),
+        visibleTileCount:
+          currentPlayerId && fogOfWar[currentPlayerId]
+            ? Object.values(fogOfWar[currentPlayerId]).filter(Boolean).length
+            : 0
+      });
+
+    (window as Window & { advanceTime?: (ms: number) => void }).advanceTime = () => {
+      // Turn-based strategy does not require frame stepping.
+    };
+  }, [actionAnimationBusy, currentPlayerId, diplomacyLog, fogOfWar, gameOver, lastCombatTurnByPair, players, setup.mapSize, setup.matchInitialized, tiles, turnNumber, units, villages]);
+
+  useEffect(() => {
+    if (!setup.matchInitialized || gameOver || !currentPlayerIsAI || aiTurnInProgress) return;
+    void runAITurn();
+  }, [aiTurnInProgress, currentPlayerIsAI, gameOver, runAITurn, setup.matchInitialized]);
+
+  const contactDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!firstContactNotification) return;
+    if (contactDismissRef.current) clearTimeout(contactDismissRef.current);
+    contactDismissRef.current = setTimeout(() => dismissFirstContact(), 4000);
+    return () => { if (contactDismissRef.current) clearTimeout(contactDismissRef.current); };
+  }, [firstContactNotification, dismissFirstContact]);
+
+  const diplomacyDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!diplomaticNotification) return;
+    if (diplomacyDismissRef.current) clearTimeout(diplomacyDismissRef.current);
+    diplomacyDismissRef.current = setTimeout(() => dismissDiplomaticNotification(), 5000);
+    return () => { if (diplomacyDismissRef.current) clearTimeout(diplomacyDismissRef.current); };
+  }, [diplomaticNotification, dismissDiplomaticNotification]);
+
+  const treatyAcceptedDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!treatyAcceptedNotification) return;
+    if (treatyAcceptedDismissRef.current) clearTimeout(treatyAcceptedDismissRef.current);
+    treatyAcceptedDismissRef.current = setTimeout(() => dismissTreatyAccepted(), 5000);
+    return () => { if (treatyAcceptedDismissRef.current) clearTimeout(treatyAcceptedDismissRef.current); };
+  }, [treatyAcceptedNotification, dismissTreatyAccepted]);
+
+  const reinforcementDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!reinforcementNotification) return;
+    if (reinforcementDismissRef.current) clearTimeout(reinforcementDismissRef.current);
+    reinforcementDismissRef.current = setTimeout(() => dismissReinforcementNotification(), 5000);
+    return () => { if (reinforcementDismissRef.current) clearTimeout(reinforcementDismissRef.current); };
+  }, [reinforcementNotification, dismissReinforcementNotification]);
+
+  if (!setup.matchInitialized || players.length === 0) {
+    return (
+      <main className="min-h-screen bg-[#050812] px-4 py-10">
+        <div className="mx-auto flex min-h-[88vh] max-w-4xl items-center justify-center">
+          <Card className="w-full max-w-xl border-slate-700/60 bg-slate-950/65 p-8 text-center">
+            <h1 className="text-3xl font-bold text-white">No Active Match</h1>
+            <p className="mt-3 text-slate-300">Set up a local game from the main menu before entering the battlefield.</p>
+            <div className="mt-6 flex justify-center gap-2">
+              <Link href="/"><Button>Main Menu</Button></Link>
+              <Link href="/setup"><Button variant="secondary">Setup Match</Button></Link>
+            </div>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[#050812] px-4 py-4">
+      <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-4 xl:grid-cols-[300px_1fr_340px]">
+        <aside className="space-y-4">
+          <TurnBanner currentPlayer={currentPlayer} aiThinking={currentPlayerIsAI && aiTurnInProgress} />
+          <PlayerSidebar />
+        </aside>
+
+        <section className="space-y-4">
+          <WorldMap />
+          <ActionPanel />
+          <TechTreePanel />
+        </section>
+
+        <aside>
+          <GameLog logs={logs} players={players} contactedPlayerIds={contactedPlayerIds} humanPlayerId={humanPlayerId} />
+        </aside>
+      </div>
+
+      <TechTreeModal />
+      <CityProductionPanel />
+      <ReinforcementDonationModal />
+
+      {firstContactNotification && (
+        <div className="fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-lg border border-cyan-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-cyan-900/30 text-center">
+          <p className="text-sm font-semibold capitalize text-cyan-100">
+            First Contact — You meet <span className="text-cyan-300">{firstContactNotification}</span>
+          </p>
+          <button onClick={dismissFirstContact} className="mt-1 text-xs text-slate-400 hover:text-slate-200">Dismiss</button>
+        </div>
+      )}
+
+      {treatyAcceptedNotification && (
+        <div className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-lg border border-emerald-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-emerald-900/30 text-center">
+          <p className="text-sm font-semibold capitalize text-emerald-200">
+            ☮ <span className="capitalize">{treatyAcceptedNotification}</span> accepted the peace treaty.
+          </p>
+          <button onClick={dismissTreatyAccepted} className="mt-1 text-xs text-slate-400 hover:text-slate-200">Dismiss</button>
+        </div>
+      )}
+
+      {diplomaticNotification && (
+        <div className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-lg border border-rose-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-rose-900/30 text-center">
+          <p className="text-sm font-semibold text-rose-200">⚠ {diplomaticNotification}</p>
+          <button onClick={dismissDiplomaticNotification} className="mt-1 text-xs text-slate-400 hover:text-slate-200">Dismiss</button>
+        </div>
+      )}
+
+      {pendingPeaceTreaty && humanPlayerId === pendingPeaceTreaty.toPlayerId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <Card className="w-full max-w-sm p-6 text-center">
+            <h2 className="text-xl font-bold capitalize text-white">Peace Treaty Offer</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              <span className="capitalize text-cyan-300">{pendingPeaceTreaty.fromColor}</span> offers a peace treaty.
+            </p>
+            <p className="mt-2 rounded-md border border-cyan-500/30 bg-cyan-950/30 px-3 py-2 text-xs text-cyan-100">
+              {pendingPeaceTreaty.reason}
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => respondToPeaceTreaty(true)}
+                className="flex-1 rounded-md border border-emerald-600/50 bg-emerald-900/30 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-900/60 transition"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => respondToPeaceTreaty(false)}
+                className="flex-1 rounded-md border border-rose-600/50 bg-rose-900/30 py-2 text-sm font-medium text-rose-300 hover:bg-rose-900/60 transition"
+              >
+                Reject
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {reinforcementNotification && (
+        <div className="fixed left-1/2 top-36 z-50 -translate-x-1/2 rounded-lg border border-sky-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-sky-900/30 text-center">
+          <p className="text-sm font-semibold text-sky-200">🪖 {reinforcementNotification}</p>
+          <button onClick={dismissReinforcementNotification} className="mt-1 text-xs text-slate-400 hover:text-slate-200">Dismiss</button>
+        </div>
+      )}
+
+      {reinforcementRequest?.status === "pending" && reinforcementRequest?.toPlayerId === humanPlayerId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <Card className="w-full max-w-sm p-6 text-center">
+            <h2 className="text-xl font-bold text-white">Reinforcement Request</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              <span className="capitalize font-semibold text-sky-300">{reinforcementRequest.fromColor}</span> is requesting military reinforcements from you.
+            </p>
+            <p className="mt-1 text-xs text-slate-400">If you accept, you will choose which units to send at your own expense.</p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => respondToReinforcementRequest(true)}
+                className="flex-1 rounded-md border border-sky-600/50 bg-sky-900/30 py-2 text-sm font-medium text-sky-300 hover:bg-sky-900/60 transition"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => respondToReinforcementRequest(false)}
+                className="flex-1 rounded-md border border-slate-600/50 bg-slate-800/30 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700/50 transition"
+              >
+                Decline
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {humanEliminated && !watching && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+          <Card className="w-full max-w-sm p-6 text-center">
+            <h2 className="text-2xl font-bold text-white">You have been eliminated</h2>
+            <p className="mt-2 text-sm text-slate-400">The match is still ongoing. Watch the AI play out the rest, or leave now.</p>
+            <div className="mt-5 flex gap-3 justify-center">
+              <Button variant="secondary" onClick={() => setWatching(true)}>
+                Watch
+              </Button>
+              <Button
+                onClick={() => {
+                  resetToMenu();
+                  router.push("/");
+                }}
+              >
+                Return to Menu
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {humanEliminated && watching && (
+        <button
+          onClick={() => { resetToMenu(); router.push("/"); }}
+          className="fixed right-4 top-4 z-50 flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 bg-slate-800/90 text-slate-300 shadow-lg hover:bg-slate-700 hover:text-white transition"
+          title="Return to Menu"
+        >
+          ✕
+        </button>
+      )}
+
+      {gameOver && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+          <Card className="w-full max-w-xl p-6">
+            <h2 className="text-3xl font-bold text-white">Game Over</h2>
+            <p className="mt-2 text-sm text-slate-300">{gameOverReason ?? "Match ended."} Final ranking by tile control:</p>
+            <ol className="mt-4 space-y-2">
+              {ranking.map((entry, index) => (
+                <li key={entry.playerId} className="flex items-center justify-between rounded-md bg-panel2 px-3 py-2">
+                  <span>
+                    {index + 1}. <span className="capitalize">{entry.color}</span>
+                  </span>
+                  <span className="text-sm text-cyan-300">{entry.tileCount} tiles</span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-5 flex justify-end">
+              <Button
+                onClick={() => {
+                  resetToMenu();
+                  router.push("/");
+                }}
+              >
+                Return to Menu
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </main>
+  );
+}

@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_city.png /Users/deniz/Documents/WorldAtWar/public/units/city_blue.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_city.png /Users/deniz/Documents/WorldAtWar/public/units/city_red.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_city.png /Users/deniz/Documents/WorldAtWar/public/units/city_green.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_city.png /Users/deniz/Documents/WorldAtWar/public/units/city_purple.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_city.png /Users/deniz/Documents/WorldAtWar/public/units/city_yellow.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/green_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/blue_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/red_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/purple_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/yellow_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_warrior.png /Users/deniz/Documents/WorldAtWar/public/units/green_warrior.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_warrior.png /Users/deniz/Documents/WorldAtWar/public/units/blue_warrior.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_warrior.png /Users/deniz/Documents/WorldAtWar/public/units/red_warrior.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_warrior.png /Users/deniz/Documents/WorldAtWar/public/units/purple_warrior.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_warrior.png /Users/deniz/Documents/WorldAtWar/public/units/yellow_warrior.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_strong_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/green_strong_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_strong_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/blue_strong_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_strong_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/red_strong_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_strong_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/purple_strong_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_strong_soldier.png /Users/deniz/Documents/WorldAtWar/public/units/yellow_strong_soldier.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_tank.png /Users/deniz/Documents/WorldAtWar/public/units/green_tank.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_tank.png /Users/deniz/Documents/WorldAtWar/public/units/blue_tank.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_tank.png /Users/deniz/Documents/WorldAtWar/public/units/red_tank.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_tank.png /Users/deniz/Documents/WorldAtWar/public/units/purple_tank.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_tank.png /Users/deniz/Documents/WorldAtWar/public/units/yellow_tank.png)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(grep -l \"sendPeaceTreaty\\\\|respondToPeaceTreaty\\\\|breakPeaceTreaty\\\\|diplomaticNotification\\\\|treatyAccepted\" /Users/deniz/Documents/WorldAtWar/src/components/**/*.tsx)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(cp /Users/deniz/Desktop/Developer/blue_attack_chopter.png /Users/deniz/Documents/WorldAtWar/public/units/blue_attack_chopter.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/red_attack_chopter.png /Users/deniz/Documents/WorldAtWar/public/units/red_attack_chopter.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/green_attack_chopter.png /Users/deniz/Documents/WorldAtWar/public/units/green_attack_chopter.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/yellow_attack_chopter.png /Users/deniz/Documents/WorldAtWar/public/units/yellow_attack_chopter.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/purple_attack_chopter.png /Users/deniz/Documents/WorldAtWar/public/units/purple_attack_chopter.png)",
+      "Bash(find /Users/deniz/Documents/WorldAtWar -type f -name *.java -o -name *.ts -o -name *.tsx -o -name *.js -o -name *.cpp -o -name *.h -o -name *.c)",
+      "Bash(find /Users/deniz/Documents/WorldAtWar/src -type f \\\\\\(-name *.ts -o -name *.tsx -o -name *.js \\\\\\))"
+    ]
+  }
+}

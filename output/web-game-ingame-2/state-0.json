@@ -1,0 +1,1 @@
+{"note":"Axial coords with q rightward and r downward-right","turnNumber":1,"maxTurns":30,"currentPlayerId":"player_1","gameOver":false,"players":[{"id":"player_1","color":"blue","armyReserve":300,"gold":50},{"id":"player_2","color":"red","armyReserve":300,"gold":50}],"ownedTiles":[{"playerId":"player_1","count":1},{"playerId":"player_2","count":1}],"selectedTileKey":null}
