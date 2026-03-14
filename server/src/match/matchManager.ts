@@ -137,6 +137,10 @@ export const createMatchForRoom = (room: GameRoom, hostId: string): MatchResult 
     fogOfWar: exploredTiles,
     lastCombatTurnByPair: {},
     factionContactPairs: [],
+    contactedPlayerIdsByPlayer: Object.fromEntries(initial.players.map((player) => [player.id, []])),
+    firstContactNotificationByPlayer: Object.fromEntries(initial.players.map((player) => [player.id, null])),
+    contactedPlayerIds: [],
+    firstContactNotification: null,
     peaceTreaties: [],
     peaceMemories: createInitialPeaceMemories(initial.players, initial.tiles, initial.units, initial.villages, 1),
     outgoingTreaty: null,
@@ -189,6 +193,8 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
   });
 
   const filteredVillages = filterVillagesForPerspective(match.villages, exploredForPlayer);
+  const contactedPlayerIds = match.contactedPlayerIdsByPlayer[gamePlayerId] ?? [];
+  const firstContactNotification = match.firstContactNotificationByPlayer[gamePlayerId] ?? null;
 
   return {
     ...match,
@@ -206,7 +212,15 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
     },
     fogOfWar: {
       [gamePlayerId]: exploredForPlayer
-    }
+    },
+    contactedPlayerIdsByPlayer: {
+      [gamePlayerId]: contactedPlayerIds
+    },
+    firstContactNotificationByPlayer: {
+      [gamePlayerId]: firstContactNotification
+    },
+    contactedPlayerIds,
+    firstContactNotification
   };
 };
 

@@ -140,6 +140,13 @@ const mergeExplored = (previous: FogOfWarState, visible: FogOfWarState) => {
   return next;
 };
 
+const clearFirstContactNotifications = (match: MatchState): MatchState => ({
+  ...match,
+  firstContactNotificationByPlayer: Object.fromEntries(
+    match.players.map((player) => [player.id, null])
+  )
+});
+
 const syncContacts = (tiles: Tile[], existing: string[]) => {
   const known = new Set(existing);
   const byKey = new Map(tiles.map((tile) => [tile.key, tile]));
@@ -154,11 +161,62 @@ const syncContacts = (tiles: Tile[], existing: string[]) => {
   return Array.from(known);
 };
 
+const buildKnownContacts = (
+  playerId: string,
+  knownBefore: string[],
+  tiles: Tile[],
+  units: Unit[],
+  explored: Record<string, boolean>
+) => {
+  const known = new Set(knownBefore);
+  const newlyDiscovered: string[] = [];
+
+  const register = (ownerId: string) => {
+    if (ownerId === playerId || known.has(ownerId)) return;
+    known.add(ownerId);
+    newlyDiscovered.push(ownerId);
+  };
+
+  for (const tile of tiles) {
+    if (!explored[tile.key] || !tile.ownerId) continue;
+    register(tile.ownerId);
+  }
+
+  for (const unit of units) {
+    if (!explored[unit.tileKey]) continue;
+    register(unit.ownerId);
+  }
+
+  return {
+    known: Array.from(known),
+    newlyDiscovered
+  };
+};
+
 const finalizeMatchState = (match: MatchState): MatchState => {
   const visibleTiles = computeVisibleTiles(match.players, match.units, match.map.tiles);
   const exploredTiles = mergeExplored(match.exploredTiles, visibleTiles);
   const players = updatePlayerAliveState(match.players, match.map.tiles, match.units);
   const alivePlayers = getAlivePlayers(players);
+  const contactedPlayerIdsByPlayer: Record<string, string[]> = {};
+  const firstContactNotificationByPlayer: Record<string, PlayerColor | null> = {};
+
+  for (const player of players) {
+    const explored = exploredTiles[player.id] ?? {};
+    const prevKnown = match.contactedPlayerIdsByPlayer[player.id] ?? [];
+    const { known, newlyDiscovered } = buildKnownContacts(
+      player.id,
+      prevKnown,
+      match.map.tiles,
+      match.units,
+      explored
+    );
+    contactedPlayerIdsByPlayer[player.id] = known;
+    const firstNew = newlyDiscovered[0] ?? null;
+    firstContactNotificationByPlayer[player.id] = firstNew
+      ? (players.find((entry) => entry.id === firstNew)?.color ?? null)
+      : (match.firstContactNotificationByPlayer[player.id] ?? null);
+  }
   const capitalOwners = getCapitalOwnerIds(match.map.tiles);
   const winnerByAlive = alivePlayers.length === 1 ? alivePlayers[0].id : null;
   const winnerByCapitals = capitalOwners.length === 1 ? capitalOwners[0] : null;
@@ -188,6 +246,10 @@ const finalizeMatchState = (match: MatchState): MatchState => {
     visibleTiles,
     fogOfWar: exploredTiles,
     factionContactPairs: syncContacts(match.map.tiles, match.factionContactPairs),
+    contactedPlayerIdsByPlayer,
+    firstContactNotificationByPlayer,
+    contactedPlayerIds: match.contactedPlayerIds,
+    firstContactNotification: match.firstContactNotification,
     gameOver,
     phase: gameOver ? "finished" : match.phase,
     gameOverReason,
@@ -455,6 +517,8 @@ const applyHealUnit = (match: MatchState, actingPlayerId: string, unitId: string
 
 const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: string): ActionResult => {
   if (actingPlayerId === toPlayerId) return { ok: false, error: "invalid_peace_target" };
+  const contacted = match.contactedPlayerIdsByPlayer[actingPlayerId] ?? [];
+  if (!contacted.includes(toPlayerId)) return { ok: false, error: "faction_not_discovered" };
   if (arePeacePartners(match.peaceTreaties, actingPlayerId, toPlayerId)) return { ok: false, error: "already_at_peace" };
 
   const fromColor = match.players.find((entry) => entry.id === actingPlayerId)?.color;
@@ -638,50 +702,77 @@ export const runAISteps = (input: MatchState): MatchState => {
 };
 
 export const applyGameAction = (match: MatchState, actingPlayerId: string, action: GameAction): ActionResult => {
+  const matchForAction = clearFirstContactNotifications(match);
+
   if (action.type === "surrender") {
-    const result = applySurrender(match, actingPlayerId);
+    const result = applySurrender(matchForAction, actingPlayerId);
     if (!result.ok) return result;
     return { ok: true, match: runAISteps(finalizeMatchState(result.match)) };
   }
 
-  const turnCheck = requireTurnAction(match, actingPlayerId);
+  const turnCheck = requireTurnAction(matchForAction, actingPlayerId);
   if (!turnCheck.ok) return { ok: false, error: turnCheck.error };
 
   let result: ActionResult;
 
   switch (action.type) {
     case "unit_action":
-      result = applyUnitAction(match, actingPlayerId, action.unitId, action.targetTileKey);
+      result = applyUnitAction(matchForAction, actingPlayerId, action.unitId, action.targetTileKey);
       break;
     case "produce_unit":
-      result = applyProduceUnit(match, actingPlayerId, action.unitType, action.tileKey);
+      result = applyProduceUnit(matchForAction, actingPlayerId, action.unitType, action.tileKey);
       break;
     case "unlock_tech":
-      result = applyUnlockTech(match, actingPlayerId, action.techId);
+      result = applyUnlockTech(matchForAction, actingPlayerId, action.techId);
       break;
     case "heal_unit":
-      result = applyHealUnit(match, actingPlayerId, action.unitId);
+      result = applyHealUnit(matchForAction, actingPlayerId, action.unitId);
       break;
     case "send_peace":
-      result = applySendPeace(match, actingPlayerId, action.toPlayerId);
+      result = applySendPeace(matchForAction, actingPlayerId, action.toPlayerId);
       break;
     case "respond_peace":
-      result = applyRespondPeace(match, actingPlayerId, action.accept);
+      result = applyRespondPeace(matchForAction, actingPlayerId, action.accept);
       break;
     case "send_reinforcement":
-      result = { ok: true, match: { ...match, gameLog: [...match.gameLog, createLog(match.turnNumber, "Reinforcement request sent")] } };
+      if (!(matchForAction.contactedPlayerIdsByPlayer[actingPlayerId] ?? []).includes(action.toPlayerId)) {
+        result = { ok: false, error: "faction_not_discovered" };
+      } else {
+        result = {
+          ok: true,
+          match: {
+            ...matchForAction,
+            gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, "Reinforcement request sent")]
+          }
+        };
+      }
       break;
     case "respond_reinforcement":
-      result = { ok: true, match: { ...match, gameLog: [...match.gameLog, createLog(match.turnNumber, action.accept ? "Reinforcement accepted" : "Reinforcement rejected")] } };
+      result = {
+        ok: true,
+        match: {
+          ...matchForAction,
+          gameLog: [
+            ...matchForAction.gameLog,
+            createLog(matchForAction.turnNumber, action.accept ? "Reinforcement accepted" : "Reinforcement rejected")
+          ]
+        }
+      };
       break;
     case "submit_donation":
-      result = { ok: true, match: { ...match, gameLog: [...match.gameLog, createLog(match.turnNumber, "Donation submitted")] } };
+      result = {
+        ok: true,
+        match: {
+          ...matchForAction,
+          gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, "Donation submitted")]
+        }
+      };
       break;
     case "break_peace":
-      result = applyBreakPeace(match, actingPlayerId, action.toPlayerId);
+      result = applyBreakPeace(matchForAction, actingPlayerId, action.toPlayerId);
       break;
     case "end_turn":
-      result = applyEndTurn(match);
+      result = applyEndTurn(matchForAction);
       break;
     default:
       result = { ok: false, error: "unsupported_action" };

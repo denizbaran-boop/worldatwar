@@ -63,11 +63,17 @@ export function PlayerSidebar() {
   const diplomacyRows = useMemo(() => {
     const alivePlayers = players.filter((player) => player.isAlive);
     const rows: Array<{ key: string; left: string; right: string; icon: string; label: string; tone: string }> = [];
+    const known = new Set(contactedPlayerIds);
 
     for (let i = 0; i < alivePlayers.length; i += 1) {
       for (let j = i + 1; j < alivePlayers.length; j += 1) {
         const left = alivePlayers[i];
         const right = alivePlayers[j];
+        if (humanPlayerId) {
+          const leftKnown = left.id === humanPlayerId || known.has(left.id);
+          const rightKnown = right.id === humanPlayerId || known.has(right.id);
+          if (!leftKnown || !rightKnown) continue;
+        }
         const pairKey = [left.id, right.id].sort().join(":");
         // Only show pairs where both factions have had first contact
         if (!factionContactPairs.includes(pairKey)) continue;
@@ -91,7 +97,7 @@ export function PlayerSidebar() {
     }
 
     return rows;
-  }, [factionContactPairs, lastCombatTurnByPair, peaceTreaties, players, turnNumber]);
+  }, [contactedPlayerIds, factionContactPairs, humanPlayerId, lastCombatTurnByPair, peaceTreaties, players, turnNumber]);
 
   return (
     <Card className="p-4">

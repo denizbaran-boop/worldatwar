@@ -375,3 +375,27 @@ TODO / next agent suggestions:
 - Expand server action reducer parity for advanced diplomacy/reinforcement branches to fully match single-player local store behavior edge-cases.
 - Add automated CI e2e test for multiplayer reconnect mid-turn and for invalid-action rejection surface messages.
 - Align lint tooling (`next lint` + ESLint v9 flat config) so lint can run reliably in this repo.
+
+- Fixed multiplayer first-contact/faction-discovery synchronization:
+  - Added server-authoritative per-player discovery fields to match state:
+    - `contactedPlayerIdsByPlayer`
+    - `firstContactNotificationByPlayer`
+    - perspective-projected `contactedPlayerIds` + `firstContactNotification`
+  - First contact is now computed server-side from explored fog + seen ownership/units during `finalizeMatchState`.
+  - Perspective snapshots now include discovery state for reconnect restoration in `getPerspectiveState`.
+  - Multiplayer client now hydrates `contactedPlayerIds` and `firstContactNotification` from server snapshots so sidebar + banner update immediately.
+  - Diplomacy panel rows are now visibility-gated by discovered factions to avoid revealing unknown factions.
+  - Server now validates discovery before diplomacy intents (`send_peace`, `send_reinforcement`) with `faction_not_discovered`.
+  - Kept single-player behavior untouched.
+
+- Regression checks expanded (`server/scripts/multiplayer-regression.ts`):
+  - capital capture elimination
+  - surrender on own turn
+  - surrender on another turn + turn skip
+  - first-contact sync + reconnect perspective restoration
+
+Validation:
+- `npm run test:multiplayer-regression` (server) passed.
+- `npm run build` (server) passed.
+- `npm run build` (frontend) passed.
+- `npm run typecheck` (root) passed.

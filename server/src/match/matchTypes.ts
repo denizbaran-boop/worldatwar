@@ -37,6 +37,14 @@ export type MatchState = {
   fogOfWar: FogOfWarState;
   lastCombatTurnByPair: Record<string, number>;
   factionContactPairs: string[];
+  /** Per player: discovered opposing factions */
+  contactedPlayerIdsByPlayer: Record<string, string[]>;
+  /** Per player: transient first-contact banner color */
+  firstContactNotificationByPlayer: Record<string, PlayerColor | null>;
+  /** Perspective-projected helper (filled in getPerspectiveState) */
+  contactedPlayerIds: string[];
+  /** Perspective-projected helper (filled in getPerspectiveState) */
+  firstContactNotification: PlayerColor | null;
   peaceTreaties: PeaceTreaty[];
   peaceMemories: Record<string, PeacePairMemory>;
   outgoingTreaty: PeaceOffer | null;

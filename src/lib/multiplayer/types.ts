@@ -90,6 +90,10 @@ export type MatchState = {
   fogOfWar: FogOfWarState;
   lastCombatTurnByPair: Record<string, number>;
   factionContactPairs: string[];
+  contactedPlayerIdsByPlayer: Record<string, string[]>;
+  firstContactNotificationByPlayer: Record<string, PlayerColor | null>;
+  contactedPlayerIds: string[];
+  firstContactNotification: PlayerColor | null;
   peaceTreaties: PeaceTreaty[];
   peaceMemories: Record<string, PeacePairMemory>;
   outgoingTreaty: PeaceOffer | null;

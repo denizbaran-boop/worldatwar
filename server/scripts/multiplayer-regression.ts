@@ -1,5 +1,6 @@
 import { applyGameAction } from "../src/actions/matchActions";
 import { createInitialFog } from "../src/game/fogOfWar";
+import { getPerspectiveState } from "../src/match/matchManager";
 import type { MatchState } from "../src/match/matchTypes";
 import type { Player, Tile, Unit, Village } from "../src/game/types";
 
@@ -49,6 +50,10 @@ function makeBaseMatch(input: {
     fogOfWar: fog,
     lastCombatTurnByPair: {},
     factionContactPairs: [],
+    contactedPlayerIdsByPlayer: Object.fromEntries(players.map((p) => [p.id, []])),
+    firstContactNotificationByPlayer: Object.fromEntries(players.map((p) => [p.id, null])),
+    contactedPlayerIds: [],
+    firstContactNotification: null,
     peaceTreaties: [],
     peaceMemories: {},
     outgoingTreaty: null,
@@ -139,10 +144,46 @@ function testSurrenderOtherTurnAndTurnOrder() {
   assert(afterEndTurn.match.currentPlayerId === "player_3", "turn order must skip surrendered commander");
 }
 
+function testFirstContactSyncAndReconnect() {
+  const players = makePlayers(["player_1", "player_2"]);
+  const tiles: Tile[] = [
+    { key: "0,0", q: 0, r: 0, ownerId: "player_1", isCapital: true, hasGoldMine: false, villageId: null, controlledByVillageId: null },
+    { key: "1,0", q: 1, r: 0, ownerId: "player_2", isCapital: true, hasGoldMine: false, villageId: null, controlledByVillageId: null },
+    { key: "0,1", q: 0, r: 1, ownerId: null, isCapital: false, hasGoldMine: false, villageId: null, controlledByVillageId: null }
+  ];
+  const units: Unit[] = [
+    { id: "u1", ownerId: "player_1", tileKey: "0,0", type: "basic_soldier", health: 2, hasMovedThisTurn: false, hasAttackedThisTurn: false, movesUsed: 0 },
+    { id: "u2", ownerId: "player_2", tileKey: "1,0", type: "basic_soldier", health: 2, hasMovedThisTurn: false, hasAttackedThisTurn: false, movesUsed: 0 }
+  ];
+
+  const match = makeBaseMatch({ players, tiles, units, currentPlayerId: "player_1" });
+  const moved = applyGameAction(match, "player_1", { type: "unit_action", unitId: "u1", targetTileKey: "0,1" });
+  assert(moved.ok, "movement for first-contact setup should succeed");
+  if (!moved.ok) return;
+
+  const player1Known = moved.match.contactedPlayerIdsByPlayer["player_1"] ?? [];
+  assert(player1Known.includes("player_2"), "discovering player must register first contact on server state");
+  assert(
+    moved.match.firstContactNotificationByPlayer["player_1"] === "red",
+    "discovering player should receive first contact notification color"
+  );
+
+  const perspective = getPerspectiveState(moved.match, "lobby_1");
+  assert(
+    perspective.contactedPlayerIds.includes("player_2"),
+    "perspective snapshot should include contacted factions for reconnect"
+  );
+  assert(
+    perspective.firstContactNotification === "red",
+    "perspective snapshot should include first contact notification"
+  );
+}
+
 function main() {
   testCapitalCaptureElimination();
   testSurrenderOwnTurn();
   testSurrenderOtherTurnAndTurnOrder();
+  testFirstContactSyncAndReconnect();
   console.log("multiplayer regression checks: PASS");
 }
 

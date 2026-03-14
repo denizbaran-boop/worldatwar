@@ -132,6 +132,8 @@ export function GamePageClient() {
       logs: match.gameLog,
       diplomacyLog: match.diplomacyLog,
       lastCombatTurnByPair: match.lastCombatTurnByPair,
+      contactedPlayerIds: match.contactedPlayerIds,
+      firstContactNotification: match.firstContactNotification,
       factionContactPairs: match.factionContactPairs,
       peaceTreaties: match.peaceTreaties,
       peaceMemories: match.peaceMemories,
