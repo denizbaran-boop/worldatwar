@@ -236,6 +236,20 @@ const finalizeMatchState = (match: MatchState): MatchState => {
       : findNextAlivePlayerId(players, match.currentPlayerId) ?? match.currentPlayerId;
   const settledCurrentFaction =
     players.find((player) => player.id === settledCurrentPlayerId)?.color ?? match.currentFaction;
+  let pendingPeaceTreaty = match.pendingPeaceTreaty;
+  if (pendingPeaceTreaty) {
+    const activeOffer = pendingPeaceTreaty;
+    const fromAlive = players.some((player) => player.id === activeOffer.fromPlayerId && player.isAlive);
+    const toAlive = players.some((player) => player.id === activeOffer.toPlayerId && player.isAlive);
+    const alreadyAtPeace = arePeacePartners(
+      match.peaceTreaties,
+      activeOffer.fromPlayerId,
+      activeOffer.toPlayerId
+    );
+    if (!fromAlive || !toAlive || alreadyAtPeace) {
+      pendingPeaceTreaty = null;
+    }
+  }
 
   return {
     ...match,
@@ -250,6 +264,9 @@ const finalizeMatchState = (match: MatchState): MatchState => {
     firstContactNotificationByPlayer,
     contactedPlayerIds: match.contactedPlayerIds,
     firstContactNotification: match.firstContactNotification,
+    outgoingTreaty: null,
+    pendingPeaceTreaty,
+    pendingTreatyResult: null,
     gameOver,
     phase: gameOver ? "finished" : match.phase,
     gameOverReason,
@@ -517,6 +534,9 @@ const applyHealUnit = (match: MatchState, actingPlayerId: string, unitId: string
 
 const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: string): ActionResult => {
   if (actingPlayerId === toPlayerId) return { ok: false, error: "invalid_peace_target" };
+  if (match.pendingPeaceTreaty) return { ok: false, error: "peace_offer_pending" };
+  if (!match.players.some((entry) => entry.id === actingPlayerId && entry.isAlive)) return { ok: false, error: "player_not_found" };
+  if (!match.players.some((entry) => entry.id === toPlayerId && entry.isAlive)) return { ok: false, error: "invalid_peace_target" };
   const contacted = match.contactedPlayerIdsByPlayer[actingPlayerId] ?? [];
   if (!contacted.includes(toPlayerId)) return { ok: false, error: "faction_not_discovered" };
   if (arePeacePartners(match.peaceTreaties, actingPlayerId, toPlayerId)) return { ok: false, error: "already_at_peace" };
@@ -539,7 +559,8 @@ const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: s
         turnSent: match.turnNumber,
         direction: "human_outgoing"
       },
-      gameLog: [...match.gameLog, createLog(match.turnNumber, `${fromColor} proposed peace to ${toColor}`, fromColor)]
+      gameLog: [...match.gameLog, createLog(match.turnNumber, `${fromColor} proposed peace to ${toColor}`, fromColor)],
+      diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, `${fromColor} proposed peace to ${toColor}`, fromColor)]
     }
   };
 };
@@ -547,26 +568,34 @@ const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: s
 const applyRespondPeace = (match: MatchState, actingPlayerId: string, accept: boolean): ActionResult => {
   const offer = match.pendingPeaceTreaty;
   if (!offer || offer.toPlayerId !== actingPlayerId) return { ok: false, error: "no_pending_peace_offer" };
+  if (!match.players.some((entry) => entry.id === offer.fromPlayerId && entry.isAlive)) {
+    return { ok: false, error: "peace_offer_sender_unavailable" };
+  }
 
   const fromColor = offer.fromColor;
   const toColor = offer.toColor;
+  const hasTreaty = arePeacePartners(match.peaceTreaties, offer.fromPlayerId, offer.toPlayerId);
+  const nextPeaceTreaties =
+    accept && !hasTreaty
+      ? [...match.peaceTreaties, { playerA: offer.fromPlayerId, playerB: offer.toPlayerId }]
+      : match.peaceTreaties;
+  const outcomeText = accept
+    ? `${toColor} accepted peace with ${fromColor}`
+    : `${toColor} rejected peace from ${fromColor}`;
 
   return {
     ok: true,
     match: {
       ...match,
-      peaceTreaties: accept ? [...match.peaceTreaties, { playerA: offer.fromPlayerId, playerB: offer.toPlayerId }] : match.peaceTreaties,
+      peaceTreaties: nextPeaceTreaties,
+      outgoingTreaty: null,
       pendingPeaceTreaty: null,
+      pendingTreatyResult: null,
       gameLog: [
         ...match.gameLog,
-        createLog(
-          match.turnNumber,
-          accept
-            ? `${toColor} accepted peace with ${fromColor}`
-            : `${toColor} rejected peace from ${fromColor}`,
-          toColor
-        )
-      ]
+        createLog(match.turnNumber, outcomeText, toColor)
+      ],
+      diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, outcomeText, toColor)]
     }
   };
 };
@@ -630,6 +659,12 @@ const applyEndTurn = (match: MatchState): ActionResult => {
   const refreshedUnits = resetMovementForPlayer(regenUnits, nextPlayerId);
   const nextColor = playersWithIncome.find((entry) => entry.id === nextPlayerId)?.color;
 
+  const pending = match.pendingPeaceTreaty;
+  const autoRejectPending = Boolean(pending && pending.toPlayerId === match.currentPlayerId);
+  const autoRejectText = autoRejectPending
+    ? `${pending?.toColor ?? match.currentFaction} rejected peace from ${pending?.fromColor ?? "unknown"}`
+    : null;
+
   const next = finalizeMatchState({
     ...match,
     turnNumber: nextTurn,
@@ -637,8 +672,18 @@ const applyEndTurn = (match: MatchState): ActionResult => {
     currentFaction: nextColor ?? match.currentFaction,
     players: playersWithIncome,
     units: refreshedUnits,
+    outgoingTreaty: null,
+    pendingPeaceTreaty: autoRejectPending ? null : match.pendingPeaceTreaty,
+    pendingTreatyResult: null,
     justBrokePeace: [],
-    gameLog: [...match.gameLog, createLog(nextTurn, `${nextColor ?? nextPlayerId} ended turn`, nextColor)]
+    gameLog: [
+      ...match.gameLog,
+      ...(autoRejectText ? [createLog(match.turnNumber, autoRejectText, pending?.toColor)] : []),
+      createLog(nextTurn, `${nextColor ?? nextPlayerId} ended turn`, nextColor)
+    ],
+    diplomacyLog: autoRejectText
+      ? [...match.diplomacyLog, createLog(match.turnNumber, autoRejectText, pending?.toColor)]
+      : match.diplomacyLog
   });
 
   return { ok: true, match: next };

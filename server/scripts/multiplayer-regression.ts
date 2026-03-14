@@ -25,8 +25,9 @@ function makeBaseMatch(input: {
   units: Unit[];
   villages?: Village[];
   currentPlayerId: string;
+  contactedPlayerIdsByPlayer?: Record<string, string[]>;
 }): MatchState {
-  const { players, tiles, units, villages = [], currentPlayerId } = input;
+  const { players, tiles, units, villages = [], currentPlayerId, contactedPlayerIdsByPlayer } = input;
   const fog = createInitialFog(players.map((p) => p.id));
   const lobbyToGamePlayer = Object.fromEntries(players.map((p, i) => [`lobby_${i + 1}`, p.id]));
   const playerAssignments = Object.fromEntries(players.map((p, i) => [p.id, `lobby_${i + 1}`]));
@@ -50,7 +51,8 @@ function makeBaseMatch(input: {
     fogOfWar: fog,
     lastCombatTurnByPair: {},
     factionContactPairs: [],
-    contactedPlayerIdsByPlayer: Object.fromEntries(players.map((p) => [p.id, []])),
+    contactedPlayerIdsByPlayer:
+      contactedPlayerIdsByPlayer ?? Object.fromEntries(players.map((p) => [p.id, []])),
     firstContactNotificationByPlayer: Object.fromEntries(players.map((p) => [p.id, null])),
     contactedPlayerIds: [],
     firstContactNotification: null,
@@ -71,6 +73,28 @@ function makeBaseMatch(input: {
     ranking: [],
     winner: null
   };
+}
+
+function makeTwoPlayerPeaceMatch() {
+  const players = makePlayers(["player_1", "player_2"]);
+  const tiles: Tile[] = [
+    { key: "0,0", q: 0, r: 0, ownerId: "player_1", isCapital: true, hasGoldMine: false, villageId: null, controlledByVillageId: null },
+    { key: "1,0", q: 1, r: 0, ownerId: "player_2", isCapital: true, hasGoldMine: false, villageId: null, controlledByVillageId: null }
+  ];
+  const units: Unit[] = [
+    { id: "u1", ownerId: "player_1", tileKey: "0,0", type: "basic_soldier", health: 2, hasMovedThisTurn: false, hasAttackedThisTurn: false, movesUsed: 0 },
+    { id: "u2", ownerId: "player_2", tileKey: "1,0", type: "basic_soldier", health: 2, hasMovedThisTurn: false, hasAttackedThisTurn: false, movesUsed: 0 }
+  ];
+  return makeBaseMatch({
+    players,
+    tiles,
+    units,
+    currentPlayerId: "player_1",
+    contactedPlayerIdsByPlayer: {
+      player_1: ["player_2"],
+      player_2: ["player_1"]
+    }
+  });
 }
 
 function testCapitalCaptureElimination() {
@@ -179,11 +203,103 @@ function testFirstContactSyncAndReconnect() {
   );
 }
 
+function testPeaceTreatyPendingAndTurnGatedDelivery() {
+  const match = makeTwoPlayerPeaceMatch();
+  const sent = applyGameAction(match, "player_1", { type: "send_peace", toPlayerId: "player_2" });
+  assert(sent.ok, "send peace should succeed when factions have contact");
+  if (!sent.ok) return;
+
+  assert(Boolean(sent.match.pendingPeaceTreaty), "pending peace treaty must be stored on server");
+
+  const senderView = getPerspectiveState(sent.match, "lobby_1");
+  assert(
+    senderView.outgoingTreaty?.toPlayerId === "player_2",
+    "sender perspective should expose outgoing treaty waiting state"
+  );
+  assert(senderView.pendingPeaceTreaty === null, "sender should not receive incoming peace modal");
+
+  const receiverBeforeTurn = getPerspectiveState(sent.match, "lobby_2");
+  assert(
+    receiverBeforeTurn.pendingPeaceTreaty === null,
+    "receiver should not see actionable pending treaty before their turn"
+  );
+
+  const advanced = applyGameAction(sent.match, "player_1", { type: "end_turn" });
+  assert(advanced.ok, "end turn after sending peace should succeed");
+  if (!advanced.ok) return;
+  assert(advanced.match.currentPlayerId === "player_2", "turn should advance to peace target");
+
+  const receiverOnTurn = getPerspectiveState(advanced.match, "lobby_2");
+  assert(
+    receiverOnTurn.pendingPeaceTreaty?.fromPlayerId === "player_1",
+    "receiver should get pending peace treaty on their turn"
+  );
+}
+
+function testPeaceTreatyRespondAcceptAndReject() {
+  const base = makeTwoPlayerPeaceMatch();
+  const sent = applyGameAction(base, "player_1", { type: "send_peace", toPlayerId: "player_2" });
+  assert(sent.ok, "peace send should succeed before accept test");
+  if (!sent.ok) return;
+  const toResponderTurn = applyGameAction(sent.match, "player_1", { type: "end_turn" });
+  assert(toResponderTurn.ok, "turn advance should succeed before accept test");
+  if (!toResponderTurn.ok) return;
+
+  const accepted = applyGameAction(toResponderTurn.match, "player_2", { type: "respond_peace", accept: true });
+  assert(accepted.ok, "peace accept should succeed");
+  if (!accepted.ok) return;
+  assert(accepted.match.pendingPeaceTreaty === null, "pending treaty should clear after accept");
+  assert(
+    accepted.match.peaceTreaties.some(
+      (entry) =>
+        (entry.playerA === "player_1" && entry.playerB === "player_2") ||
+        (entry.playerA === "player_2" && entry.playerB === "player_1")
+    ),
+    "accepted response should create peace treaty"
+  );
+
+  const baseReject = makeTwoPlayerPeaceMatch();
+  const sentReject = applyGameAction(baseReject, "player_1", { type: "send_peace", toPlayerId: "player_2" });
+  assert(sentReject.ok, "peace send should succeed before reject test");
+  if (!sentReject.ok) return;
+  const toResponderTurnReject = applyGameAction(sentReject.match, "player_1", { type: "end_turn" });
+  assert(toResponderTurnReject.ok, "turn advance should succeed before reject test");
+  if (!toResponderTurnReject.ok) return;
+
+  const rejected = applyGameAction(toResponderTurnReject.match, "player_2", { type: "respond_peace", accept: false });
+  assert(rejected.ok, "peace reject should succeed");
+  if (!rejected.ok) return;
+  assert(rejected.match.pendingPeaceTreaty === null, "pending treaty should clear after reject");
+  assert(rejected.match.peaceTreaties.length === 0, "reject should not create treaty");
+}
+
+function testPeaceTreatyAutoRejectOnTargetEndTurn() {
+  const match = makeTwoPlayerPeaceMatch();
+  const sent = applyGameAction(match, "player_1", { type: "send_peace", toPlayerId: "player_2" });
+  assert(sent.ok, "peace send should succeed before auto reject test");
+  if (!sent.ok) return;
+  const toResponderTurn = applyGameAction(sent.match, "player_1", { type: "end_turn" });
+  assert(toResponderTurn.ok, "turn advance should succeed before auto reject test");
+  if (!toResponderTurn.ok) return;
+
+  const skipped = applyGameAction(toResponderTurn.match, "player_2", { type: "end_turn" });
+  assert(skipped.ok, "target ending turn without response should succeed");
+  if (!skipped.ok) return;
+  assert(skipped.match.pendingPeaceTreaty === null, "pending peace must not get stuck forever");
+  assert(
+    skipped.match.gameLog.some((entry) => entry.text.includes("rejected peace from")),
+    "auto-reject should produce synchronized log entry"
+  );
+}
+
 function main() {
   testCapitalCaptureElimination();
   testSurrenderOwnTurn();
   testSurrenderOtherTurnAndTurnOrder();
   testFirstContactSyncAndReconnect();
+  testPeaceTreatyPendingAndTurnGatedDelivery();
+  testPeaceTreatyRespondAcceptAndReject();
+  testPeaceTreatyAutoRejectOnTargetEndTurn();
   console.log("multiplayer regression checks: PASS");
 }
 

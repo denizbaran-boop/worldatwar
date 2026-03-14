@@ -195,6 +195,15 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
   const filteredVillages = filterVillagesForPerspective(match.villages, exploredForPlayer);
   const contactedPlayerIds = match.contactedPlayerIdsByPlayer[gamePlayerId] ?? [];
   const firstContactNotification = match.firstContactNotificationByPlayer[gamePlayerId] ?? null;
+  const pendingOffer = match.pendingPeaceTreaty;
+  const outgoingTreaty =
+    pendingOffer && pendingOffer.fromPlayerId === gamePlayerId ? pendingOffer : null;
+  const pendingPeaceTreaty =
+    pendingOffer &&
+    pendingOffer.toPlayerId === gamePlayerId &&
+    match.currentPlayerId === gamePlayerId
+      ? pendingOffer
+      : null;
 
   return {
     ...match,
@@ -220,7 +229,9 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
       [gamePlayerId]: firstContactNotification
     },
     contactedPlayerIds,
-    firstContactNotification
+    firstContactNotification,
+    outgoingTreaty,
+    pendingPeaceTreaty
   };
 };
 
