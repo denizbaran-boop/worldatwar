@@ -19,7 +19,8 @@ import { useGameStore } from "@/store/gameStore";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
 import { useRoom } from "@/lib/multiplayer/useRoom";
 import { useMatch } from "@/lib/multiplayer/useMatch";
-import type { GameAction } from "@/lib/multiplayer/types";
+import type { GameAction, MatchState } from "@/lib/multiplayer/types";
+import type { PlayerColor } from "@/lib/game/types";
 
 export function GamePageClient() {
   const router = useRouter();
@@ -118,7 +119,32 @@ export function GamePageClient() {
   useEffect(() => {
     if (!multiplayerEnabled || !match || !localPlayerId) return;
 
+    const prevMatch = prevMatchStateRef.current;
+    prevMatchStateRef.current = match;
     const localGamePlayerId = match.lobbyToGamePlayer[localPlayerId] ?? null;
+
+    // Detect peace treaty resolution for multiplayer notifications
+    let nextTreatyAccepted: PlayerColor | null = null;
+    let nextDiplomaticMsg: string | null = null;
+    if (prevMatch && localGamePlayerId) {
+      const prevPending = prevMatch.pendingPeaceTreaty;
+      const currPending = match.pendingPeaceTreaty;
+      // The pending offer was cleared
+      if (prevPending && !currPending && prevPending.fromPlayerId === localGamePlayerId) {
+        // We sent the offer; check if treaty was created
+        const wasAccepted = match.peaceTreaties.some(
+          (t) =>
+            (t.playerA === prevPending.fromPlayerId && t.playerB === prevPending.toPlayerId) ||
+            (t.playerA === prevPending.toPlayerId && t.playerB === prevPending.fromPlayerId)
+        );
+        if (wasAccepted) {
+          nextTreatyAccepted = prevPending.toColor;
+        } else {
+          nextDiplomaticMsg = `${prevPending.toColor.charAt(0).toUpperCase() + prevPending.toColor.slice(1)} rejected your peace offer.`;
+        }
+      }
+    }
+
     useGameStore.setState((state) => ({
       players: match.players,
       tiles: match.map.tiles,
@@ -155,7 +181,9 @@ export function GamePageClient() {
         aiDifficulty: match.aiDifficulty,
         mapSize: match.map.mapSize,
         playerCount: match.players.length
-      }
+      },
+      ...(nextTreatyAccepted ? { treatyAcceptedNotification: nextTreatyAccepted } : {}),
+      ...(nextDiplomaticMsg ? { diplomaticNotification: nextDiplomaticMsg } : {})
     }));
   }, [localPlayerId, match, multiplayerEnabled]);
 
@@ -275,6 +303,8 @@ export function GamePageClient() {
     if (!setup.matchInitialized || gameOver || !currentPlayerIsAI || aiTurnInProgress) return;
     void runAITurn();
   }, [aiTurnInProgress, currentPlayerIsAI, gameOver, multiplayerEnabled, runAITurn, setup.matchInitialized]);
+
+  const prevMatchStateRef = useRef<MatchState | null>(null);
 
   const contactDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {

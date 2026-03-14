@@ -199,11 +199,7 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
   const outgoingTreaty =
     pendingOffer && pendingOffer.fromPlayerId === gamePlayerId ? pendingOffer : null;
   const pendingPeaceTreaty =
-    pendingOffer &&
-    pendingOffer.toPlayerId === gamePlayerId &&
-    match.currentPlayerId === gamePlayerId
-      ? pendingOffer
-      : null;
+    pendingOffer && pendingOffer.toPlayerId === gamePlayerId ? pendingOffer : null;
 
   return {
     ...match,

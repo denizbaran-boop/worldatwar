@@ -64,7 +64,19 @@ export function ActionPanel() {
 
       {selectedUnit && (
         <div className="mt-3 rounded-md border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
-          {t.actionPanel.selectedPrefix} {UNIT_STATS[selectedUnit.type].name} | {t.actionPanel.moveRangeLabel} {UNIT_STATS[selectedUnit.type].movementRange} | {t.actionPanel.movedLabel} {selectedUnit.hasMovedThisTurn ? t.actionPanel.yes : t.actionPanel.no}
+          {UNIT_STATS[selectedUnit.type].domain === "air" ? (
+            <>
+              {t.actionPanel.selectedPrefix} {UNIT_STATS[selectedUnit.type].name}
+              {' | '}{t.actionPanel.movesLeftLabel}: {UNIT_STATS[selectedUnit.type].movementRange - (selectedUnit.movesUsed ?? 0)}/{UNIT_STATS[selectedUnit.type].movementRange}
+              {' | '}{t.actionPanel.attackLabel}: {selectedUnit.hasAttackedThisTurn ? t.actionPanel.yes : t.actionPanel.no}
+            </>
+          ) : (
+            <>
+              {t.actionPanel.selectedPrefix} {UNIT_STATS[selectedUnit.type].name}
+              {' | '}{t.actionPanel.moveRangeLabel} {UNIT_STATS[selectedUnit.type].movementRange}
+              {' | '}{t.actionPanel.movedLabel} {selectedUnit.hasMovedThisTurn ? t.actionPanel.yes : t.actionPanel.no}
+            </>
+          )}
         </div>
       )}
 

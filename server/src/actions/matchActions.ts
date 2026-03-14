@@ -1,6 +1,7 @@
 import { canProduceUnit, findTileByKey, findUnitOnTile, isTileOccupied, rankPlayersByTiles, unlockTechForPlayer } from "../game/actions";
 import { chooseAIMove } from "../game/ai";
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
+import { shouldAcceptPeaceOffer } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
 import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits } from "../game/fogOfWar";
 import { axialDistance, getNeighborKeys } from "../game/map";
@@ -291,7 +292,6 @@ const requireTurnAction = (match: MatchState, actingPlayerId: string): Validatio
 const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: string, targetTileKey: string): ActionResult => {
   const unit = match.units.find((entry) => entry.id === unitId);
   if (!unit || unit.ownerId !== actingPlayerId) return { ok: false, error: "invalid_unit" };
-  if (unit.hasMovedThisTurn) return { ok: false, error: "unit_already_acted" };
   if (match.justBrokePeace.length > 0) return { ok: false, error: "end_turn_required_after_break_peace" };
 
   const sourceTile = findTileByKey(match.map.tiles, unit.tileKey);
@@ -306,12 +306,22 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     return { ok: false, error: "target_occupied_by_friendly" };
   }
 
+  const isAirUnit = stats.domain === "air";
+  const movesUsed = unit.movesUsed ?? 0;
+  const effectiveMovementRange = isAirUnit ? stats.movementRange - movesUsed : stats.movementRange;
+
   const isEnemyOccupied = Boolean(occupant && occupant.ownerId !== actingPlayerId);
-  const isRangedAttack = Boolean(isEnemyOccupied && distance > stats.movementRange && distance <= stats.attackRange);
+  const isRangedAttack = Boolean(isEnemyOccupied && distance > effectiveMovementRange && distance <= stats.attackRange);
   const movingIntoPeaceTerritory =
     targetTile.ownerId !== null && arePeacePartners(match.peaceTreaties, actingPlayerId, targetTile.ownerId);
 
-  if (!isRangedAttack && distance > stats.movementRange) {
+  if (unit.hasMovedThisTurn) return { ok: false, error: "unit_already_acted" };
+  if (isEnemyOccupied && unit.hasAttackedThisTurn) return { ok: false, error: "unit_already_attacked" };
+  if (!isEnemyOccupied && isAirUnit && movesUsed > 0 && !unit.hasAttackedThisTurn) {
+    return { ok: false, error: "must_attack_before_second_move" };
+  }
+
+  if (!isRangedAttack && distance > effectiveMovementRange) {
     return { ok: false, error: "invalid_move_range" };
   }
 
@@ -340,9 +350,11 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     nextLastCombatTurnByPair[pairKey] = match.turnNumber;
 
     const combat = resolveUnitCombat(unit, occupant);
+    const movesRemaining = isAirUnit ? stats.movementRange - movesUsed : 0;
+    const doneAfterAttack = !isAirUnit || movesRemaining <= 0;
     nextUnits = nextUnits.map((entry) =>
       entry.id === unit.id
-        ? { ...entry, hasMovedThisTurn: true, hasAttackedThisTurn: true }
+        ? { ...entry, hasMovedThisTurn: doneAfterAttack, hasAttackedThisTurn: true }
         : entry
     );
 
@@ -387,13 +399,14 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
       return { ok: false, error: "air_cannot_land_on_city" };
     }
 
+    const airDoneAfterMove = isAirUnit && unit.hasAttackedThisTurn;
     nextUnits = nextUnits.map((entry) =>
       entry.id === unit.id
         ? {
             ...entry,
             tileKey: targetTile.key,
-            hasMovedThisTurn: true,
-            movesUsed: (entry.movesUsed ?? 0) + distance
+            hasMovedThisTurn: !isAirUnit || airDoneAfterMove,
+            movesUsed: movesUsed + distance
           }
         : entry
     );
@@ -737,6 +750,26 @@ export const runAISteps = (input: MatchState): MatchState => {
       if (match.gameOver) break;
     }
 
+    // Handle incoming peace offer to this AI
+    const pendingOffer = match.pendingPeaceTreaty;
+    if (pendingOffer && pendingOffer.toPlayerId === aiPlayerId) {
+      const resolution = shouldAcceptPeaceOffer({
+        selfId: aiPlayerId,
+        targetId: pendingOffer.fromPlayerId,
+        players: match.players,
+        tiles: match.map.tiles,
+        units: match.units,
+        villages: match.villages,
+        peaceTreaties: match.peaceTreaties,
+        memories: match.peaceMemories,
+        turnNumber: match.turnNumber
+      });
+      const responded = applyRespondPeace(match, aiPlayerId, resolution.accepted);
+      if (responded.ok) {
+        match = responded.match;
+      }
+    }
+
     const ended = applyEndTurn(match);
     if (!ended.ok) break;
     match = ended.match;
@@ -751,6 +784,12 @@ export const applyGameAction = (match: MatchState, actingPlayerId: string, actio
 
   if (action.type === "surrender") {
     const result = applySurrender(matchForAction, actingPlayerId);
+    if (!result.ok) return result;
+    return { ok: true, match: runAISteps(finalizeMatchState(result.match)) };
+  }
+
+  if (action.type === "respond_peace") {
+    const result = applyRespondPeace(matchForAction, actingPlayerId, action.accept);
     if (!result.ok) return result;
     return { ok: true, match: runAISteps(finalizeMatchState(result.match)) };
   }
@@ -775,9 +814,6 @@ export const applyGameAction = (match: MatchState, actingPlayerId: string, actio
       break;
     case "send_peace":
       result = applySendPeace(matchForAction, actingPlayerId, action.toPlayerId);
-      break;
-    case "respond_peace":
-      result = applyRespondPeace(matchForAction, actingPlayerId, action.accept);
       break;
     case "send_reinforcement":
       if (!(matchForAction.contactedPlayerIdsByPlayer[actingPlayerId] ?? []).includes(action.toPlayerId)) {
