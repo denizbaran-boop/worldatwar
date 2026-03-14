@@ -1,68 +1,12 @@
-import type {
-  AIDifficulty,
-  DonationEntry,
-  FogOfWarState,
-  LogEntry,
-  MapSize,
-  PeaceOffer,
-  PeacePairMemory,
-  PeaceResolution,
-  PeaceTreaty,
-  Player,
-  PlayerColor,
-  RankingEntry,
-  ReinforcementRequest,
-  TechNodeId,
-  Tile,
-  Unit,
-  UnitType,
-  Village
-} from "@/lib/game/types";
-
-export type ConnectionStatus = "connected" | "disconnected";
-
-export type RoomStatus = "lobby" | "setup" | "in_game" | "finished";
-
-export type RoomGameConfig = {
-  mapSize: MapSize;
-  aiCount: number;
-  aiDifficulty: AIDifficulty;
-  seed?: number;
-  hostColorPreference?: PlayerColor;
-  updatedAt: number;
-};
-
-export type LobbyPlayer = {
-  id: string;
-  name: string;
-  isHost: boolean;
-  joinedAt: number;
-  connectionStatus: ConnectionStatus;
-};
-
-export type GameRoom = {
-  code: string;
-  hostId: string;
-  status: RoomStatus;
-  players: LobbyPlayer[];
-  maxPlayers: number;
-  createdAt: number;
-  gameConfig?: RoomGameConfig;
-};
-
-export type RoomErrorCode =
-  | "room_not_found"
-  | "room_full"
-  | "room_not_in_lobby"
-  | "room_not_in_setup"
-  | "not_host"
-  | "player_not_in_room"
-  | "unknown_error";
-
-export type RoomErrorPayload = { event: string; error: RoomErrorCode };
-export type KickedPayload = { room: GameRoom; kickedId: string };
+import type { AIDifficulty, DonationEntry, FogOfWarState, LogEntry, MapSize, PeaceOffer, PeacePairMemory, PeaceResolution, PeaceTreaty, Player, PlayerColor, RankingEntry, ReinforcementRequest, TechNodeId, Tile, Unit, UnitType, Village } from "../game/types";
 
 export type MatchPhase = "lobby" | "setup" | "in_game" | "finished";
+
+export type MatchWinner = {
+  playerId: string;
+  color: PlayerColor;
+  reason: string;
+};
 
 export type MatchMapState = {
   tiles: Tile[];
@@ -77,7 +21,9 @@ export type MatchState = {
   turnNumber: number;
   currentPlayerId: string;
   currentFaction: PlayerColor;
+  /** gamePlayerId -> lobbyPlayerId */
   playerAssignments: Record<string, string>;
+  /** lobbyPlayerId -> gamePlayerId */
   lobbyToGamePlayer: Record<string, string>;
   aiPlayerIds: string[];
   aiDifficulty: AIDifficulty;
@@ -87,6 +33,7 @@ export type MatchState = {
   units: Unit[];
   exploredTiles: FogOfWarState;
   visibleTiles: FogOfWarState;
+  /** Backward-compatible alias for explored tiles */
   fogOfWar: FogOfWarState;
   lastCombatTurnByPair: Record<string, number>;
   factionContactPairs: string[];
@@ -105,7 +52,16 @@ export type MatchState = {
   gameOver: boolean;
   gameOverReason: string | null;
   ranking: RankingEntry[];
-  winner: { playerId: string; color: PlayerColor; reason: string } | null;
+  winner: MatchWinner | null;
+};
+
+export type MatchServerConfig = {
+  roomCode: string;
+  mapSize: MapSize;
+  aiCount: number;
+  aiDifficulty: AIDifficulty;
+  seed?: number;
+  hostColorPreference?: PlayerColor;
 };
 
 export type GameAction =
@@ -120,3 +76,32 @@ export type GameAction =
   | { type: "submit_donation"; entries: DonationEntry[] }
   | { type: "break_peace"; toPlayerId: string }
   | { type: "end_turn" };
+
+export type MatchCreatePayload = {
+  roomCode: string;
+  hostId: string;
+};
+
+export type MatchActionPayload = {
+  roomCode: string;
+  lobbyPlayerId: string;
+  action: GameAction;
+};
+
+export type MatchReconnectPayload = {
+  roomCode: string;
+  lobbyPlayerId: string;
+};
+
+export type MatchCreatedEvent = {
+  matchState: MatchState;
+};
+
+export type MatchUpdatedEvent = {
+  matchState: MatchState;
+};
+
+export type MatchErrorEvent = {
+  event: string;
+  error: string;
+};

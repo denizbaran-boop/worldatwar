@@ -11,12 +11,14 @@ import { LobbyScreen } from "@/components/game/LobbyScreen";
 import type { PlayerColor } from "@/lib/game/types";
 import { useGameStore } from "@/store/gameStore";
 import { useRoom } from "@/lib/multiplayer/useRoom";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type SetupStep = "options" | "name" | "join" | "lobby" | "config";
 type PendingAction = "create" | "join";
 
 export default function SetupPage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { setup, setSetup, startLocalMatch } = useGameStore(
     useShallow((s) => ({
       setup: s.setup,
@@ -42,6 +44,8 @@ export default function SetupPage() {
     leaveRoom:  socketLeave,
     kickPlayer: socketKick,
     startGame:  socketStart,
+    updateRoomConfig,
+    createMatch,
     clearError,
     clearKicked,
     setLocalPlayerName,
@@ -59,11 +63,24 @@ export default function SetupPage() {
   // Room status becomes "setup" → all clients navigate to config together
   useEffect(() => {
     if (room?.status === "setup") {
-      const count = Math.min(5, Math.max(2, room.players.length));
-      setSetup({ playerCount: count });
+      const count = Math.min(5, Math.max(2, room.players.length + (room.gameConfig?.aiCount ?? 0)));
+      setSetup({
+        playerCount: count,
+        aiCount: room.gameConfig?.aiCount ?? 0,
+        aiDifficulty: room.gameConfig?.aiDifficulty ?? "normal",
+        mapSize: room.gameConfig?.mapSize ?? "medium",
+        localPlayerColor: room.gameConfig?.hostColorPreference ?? "blue",
+        gameMode: (room.gameConfig?.aiCount ?? 0) > 0 ? "pvai" : "pvp"
+      });
       setStep("config");
     }
-  }, [room?.status, room?.players.length, setSetup]);
+  }, [room?.status, room?.players.length, room?.gameConfig, setSetup]);
+
+  useEffect(() => {
+    if (room?.status === "in_game") {
+      router.push("/game");
+    }
+  }, [room?.status, router]);
 
   // Kicked → return to options
   useEffect(() => {
@@ -74,15 +91,61 @@ export default function SetupPage() {
   }, [wasKicked, clearKicked]);
 
   // ── Setup config handlers (unchanged from before) ─────────────────────────
-  const onPlayerCountChange = (count: number) =>
-    setSetup({ playerCount: Math.min(5, Math.max(2, count)) });
-  const onLocalColorChange  = (color: PlayerColor) => setSetup({ localPlayerColor: color });
-  const onGameModeChange    = (mode: "pvp" | "pvai") => setSetup({ gameMode: mode });
-  const onAICountChange     = (count: number) => setSetup({ aiCount: count });
-  const onAIDifficultyChange = (d: "easy" | "normal" | "hard") => setSetup({ aiDifficulty: d });
-  const onMapSizeChange     = (size: "small" | "medium" | "large") => setSetup({ mapSize: size });
+  const isInRoomSetup = Boolean(room && step === "config");
+  const isHostInRoom = Boolean(room && room.hostId === localPlayerId);
+
+  const onPlayerCountChange = (count: number) => {
+    const value = Math.min(5, Math.max(2, count));
+    setSetup({ playerCount: value });
+  };
+
+  const onLocalColorChange  = (color: PlayerColor) => {
+    if (isInRoomSetup && !isHostInRoom) return;
+    setSetup({ localPlayerColor: color });
+    if (isInRoomSetup && isHostInRoom) {
+      updateRoomConfig({ hostColorPreference: color });
+    }
+  };
+
+  const onGameModeChange = (mode: "pvp" | "pvai") => {
+    if (isInRoomSetup && !isHostInRoom) return;
+    setSetup({ gameMode: mode });
+    if (isInRoomSetup && isHostInRoom) {
+      const aiCount = mode === "pvai" ? Math.max(1, setup.aiCount) : 0;
+      updateRoomConfig({ aiCount });
+    }
+  };
+
+  const onAICountChange = (count: number) => {
+    if (isInRoomSetup && !isHostInRoom) return;
+    setSetup({ aiCount: count });
+    if (isInRoomSetup && isHostInRoom) {
+      updateRoomConfig({ aiCount: count });
+    }
+  };
+
+  const onAIDifficultyChange = (d: "easy" | "normal" | "hard") => {
+    if (isInRoomSetup && !isHostInRoom) return;
+    setSetup({ aiDifficulty: d });
+    if (isInRoomSetup && isHostInRoom) {
+      updateRoomConfig({ aiDifficulty: d });
+    }
+  };
+
+  const onMapSizeChange = (size: "small" | "medium" | "large") => {
+    if (isInRoomSetup && !isHostInRoom) return;
+    setSetup({ mapSize: size });
+    if (isInRoomSetup && isHostInRoom) {
+      updateRoomConfig({ mapSize: size });
+    }
+  };
 
   const onStartMatch = () => {
+    if (room) {
+      if (!isHostInRoom) return;
+      createMatch();
+      return;
+    }
     startLocalMatch();
     router.push("/game");
   };
@@ -135,22 +198,27 @@ export default function SetupPage() {
         )}
 
         {step === "config" && (
-          <SetupPanel
-            playerCount={setup.playerCount}
-            aiCount={setup.aiCount}
-            localPlayerColor={setup.localPlayerColor}
-            gameMode={setup.gameMode}
-            aiDifficulty={setup.aiDifficulty}
-            mapSize={setup.mapSize}
-            onPlayerCountChange={onPlayerCountChange}
-            onAICountChange={onAICountChange}
-            onLocalColorChange={onLocalColorChange}
-            onGameModeChange={onGameModeChange}
-            onAIDifficultyChange={onAIDifficultyChange}
-            onMapSizeChange={onMapSizeChange}
-            onBack={() => setStep(room ? "lobby" : "options")}
-            onStartMatch={onStartMatch}
-          />
+          <div className="space-y-3">
+            <SetupPanel
+              playerCount={setup.playerCount}
+              aiCount={setup.aiCount}
+              localPlayerColor={setup.localPlayerColor}
+              gameMode={setup.gameMode}
+              aiDifficulty={setup.aiDifficulty}
+              mapSize={setup.mapSize}
+              onPlayerCountChange={onPlayerCountChange}
+              onAICountChange={onAICountChange}
+              onLocalColorChange={onLocalColorChange}
+              onGameModeChange={onGameModeChange}
+              onAIDifficultyChange={onAIDifficultyChange}
+              onMapSizeChange={onMapSizeChange}
+              onBack={() => setStep(room ? "lobby" : "options")}
+              onStartMatch={onStartMatch}
+            />
+            {room && !isHostInRoom && (
+              <p className="text-center text-sm text-slate-300">{t.game.hostConfiguringMatch}</p>
+            )}
+          </div>
         )}
       </div>
 

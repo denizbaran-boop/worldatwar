@@ -1,9 +1,9 @@
 import { roomStore } from "./roomStore";
-import type { GameRoom, LobbyPlayer, RoomErrorCode } from "../types";
+import type { GameRoom, LobbyPlayer, RoomErrorCode, RoomGameConfig, RoomStatus } from "../types";
 
 type RoomResult = { room?: GameRoom; error?: RoomErrorCode };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function generateCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -15,16 +15,25 @@ function generateCode(): string {
 }
 
 function snapshot(room: GameRoom): GameRoom {
-  return { ...room, players: room.players.map((p) => ({ ...p })) };
+  return {
+    ...room,
+    players: room.players.map((p) => ({ ...p })),
+    gameConfig: room.gameConfig ? { ...room.gameConfig } : undefined
+  };
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+const defaultRoomConfig = (): RoomGameConfig => ({
+  mapSize: "medium",
+  aiCount: 0,
+  aiDifficulty: "normal",
+  seed: Date.now(),
+  hostColorPreference: "blue",
+  updatedAt: Date.now()
+});
 
-export function createRoom(
-  hostId: string,
-  hostName: string,
-  maxPlayers = 6
-): GameRoom {
+// Public API
+
+export function createRoom(hostId: string, hostName: string, maxPlayers = 6): GameRoom {
   let code: string;
   do {
     code = generateCode();
@@ -40,11 +49,12 @@ export function createRoom(
         name: hostName,
         isHost: true,
         joinedAt: Date.now(),
-        connectionStatus: "connected",
-      },
+        connectionStatus: "connected"
+      }
     ],
     maxPlayers,
     createdAt: Date.now(),
+    gameConfig: defaultRoomConfig()
   };
 
   roomStore.set(code, room);
@@ -63,7 +73,6 @@ export function joinRoom(
 
   const existing = room.players.find((p) => p.id === playerId);
   if (existing) {
-    // Reconnect case — update socket metadata only
     existing.connectionStatus = "connected";
     existing.socketId = socketId;
     roomStore.set(code, room);
@@ -78,7 +87,7 @@ export function joinRoom(
     isHost: false,
     joinedAt: Date.now(),
     connectionStatus: "connected",
-    socketId,
+    socketId
   };
 
   room.players.push(newPlayer);
@@ -114,7 +123,6 @@ export function leaveRoom(code: string, playerId: string): GameRoom | null {
     return null;
   }
 
-  // Promote a new host if the host left
   if (room.hostId === playerId) {
     room.players[0].isHost = true;
     room.hostId = room.players[0].id;
@@ -124,11 +132,7 @@ export function leaveRoom(code: string, playerId: string): GameRoom | null {
   return snapshot(room);
 }
 
-export function kickPlayer(
-  code: string,
-  hostId: string,
-  targetId: string
-): RoomResult {
+export function kickPlayer(code: string, hostId: string, targetId: string): RoomResult {
   const room = roomStore.get(code);
   if (!room) return { error: "room_not_found" };
   if (room.hostId !== hostId) return { error: "not_host" };
@@ -148,10 +152,30 @@ export function startRoom(code: string, hostId: string): RoomResult {
   return { room: snapshot(room) };
 }
 
-export function markDisconnected(
-  code: string,
-  playerId: string
-): GameRoom | null {
+export function updateRoomConfig(code: string, hostId: string, patch: Partial<RoomGameConfig>): RoomResult {
+  const room = roomStore.get(code);
+  if (!room) return { error: "room_not_found" };
+  if (room.hostId !== hostId) return { error: "not_host" };
+  if (room.status !== "setup") return { error: "room_not_in_setup" };
+
+  room.gameConfig = {
+    ...(room.gameConfig ?? defaultRoomConfig()),
+    ...patch,
+    updatedAt: Date.now()
+  };
+  roomStore.set(code, room);
+  return { room: snapshot(room) };
+}
+
+export function setRoomStatus(code: string, status: RoomStatus): RoomResult {
+  const room = roomStore.get(code);
+  if (!room) return { error: "room_not_found" };
+  room.status = status;
+  roomStore.set(code, room);
+  return { room: snapshot(room) };
+}
+
+export function markDisconnected(code: string, playerId: string): GameRoom | null {
   const room = roomStore.get(code);
   if (!room) return null;
 

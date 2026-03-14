@@ -17,10 +17,20 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
+import { useRoom } from "@/lib/multiplayer/useRoom";
+import { useMatch } from "@/lib/multiplayer/useMatch";
+import type { GameAction } from "@/lib/multiplayer/types";
 
 export function GamePageClient() {
   const router = useRouter();
   const { t } = useTranslation();
+  const { room, localPlayerId } = useRoom();
+  const multiplayerEnabled = Boolean(room && room.status === "in_game" && localPlayerId);
+  const { match, syncing: matchSyncing, error: matchError, sendAction } = useMatch({
+    roomCode: room?.code ?? null,
+    lobbyPlayerId: localPlayerId,
+    enabled: multiplayerEnabled
+  });
   const {
     players,
     currentPlayerId,
@@ -98,6 +108,109 @@ export function GamePageClient() {
   const humanEliminated = Boolean(humanPlayerId && humanPlayer && !humanPlayer.isAlive && !gameOver);
   const [watching, setWatching] = useState(false);
   const currentPlayerIsAI = Boolean(currentPlayerId && aiPlayerIds.includes(currentPlayerId));
+  const multiplayerErrorText = useMemo(() => {
+    if (!matchError) return null;
+    if (matchError === "not_your_turn") return t.game.notYourTurn;
+    if (matchError.startsWith("invalid_")) return t.game.invalidMove;
+    return `${t.game.actionFailed}: ${matchError}`;
+  }, [matchError, t.game.actionFailed, t.game.invalidMove, t.game.notYourTurn]);
+
+  useEffect(() => {
+    if (!multiplayerEnabled || !match || !localPlayerId) return;
+
+    const localGamePlayerId = match.lobbyToGamePlayer[localPlayerId] ?? null;
+    useGameStore.setState((state) => ({
+      players: match.players,
+      tiles: match.map.tiles,
+      villages: match.villages,
+      units: match.units,
+      fogOfWar: match.fogOfWar,
+      currentPlayerId: match.currentPlayerId,
+      humanPlayerId: localGamePlayerId,
+      aiPlayerIds: match.aiPlayerIds,
+      turnNumber: match.turnNumber,
+      logs: match.gameLog,
+      diplomacyLog: match.diplomacyLog,
+      lastCombatTurnByPair: match.lastCombatTurnByPair,
+      factionContactPairs: match.factionContactPairs,
+      peaceTreaties: match.peaceTreaties,
+      peaceMemories: match.peaceMemories,
+      outgoingTreaty: match.outgoingTreaty,
+      pendingPeaceTreaty: match.pendingPeaceTreaty,
+      pendingTreatyResult: match.pendingTreatyResult,
+      justBrokePeace: match.justBrokePeace,
+      reinforcementRequest: match.reinforcementRequest,
+      reinforcementCooldowns: match.reinforcementCooldowns,
+      unitDonorColors: match.unitDonorColors,
+      aiPeaceDebugLog: match.aiPeaceDebugLog,
+      gameOver: match.gameOver,
+      gameOverReason: match.gameOverReason,
+      ranking: match.ranking,
+      setup: {
+        ...state.setup,
+        matchInitialized: true,
+        gameMode: match.aiPlayerIds.length > 0 ? "pvai" : "pvp",
+        aiDifficulty: match.aiDifficulty,
+        mapSize: match.map.mapSize,
+        playerCount: match.players.length
+      }
+    }));
+  }, [localPlayerId, match, multiplayerEnabled]);
+
+  useEffect(() => {
+    if (!multiplayerEnabled) return;
+
+    const original = useGameStore.getState();
+    const dispatch = (action: GameAction) => sendAction(action);
+
+    useGameStore.setState({
+      attemptUnitAction: (unitId, targetTileKey) => {
+        dispatch({ type: "unit_action", unitId, targetTileKey });
+        return { ok: true };
+      },
+      queueAnimatedUnitAction: (unitId, targetTileKey) => {
+        dispatch({ type: "unit_action", unitId, targetTileKey });
+      },
+      unlockTech: (techId) => {
+        dispatch({ type: "unlock_tech", techId });
+        return { ok: true };
+      },
+      produceUnit: (unitType, tileKey) => {
+        dispatch({ type: "produce_unit", unitType, tileKey });
+        return { ok: true };
+      },
+      healUnit: (unitId) => {
+        dispatch({ type: "heal_unit", unitId });
+        return { ok: true };
+      },
+      sendPeaceTreaty: (toPlayerId) => dispatch({ type: "send_peace", toPlayerId }),
+      respondToPeaceTreaty: (accept) => dispatch({ type: "respond_peace", accept }),
+      breakPeaceTreaty: (toPlayerId) => dispatch({ type: "break_peace", toPlayerId }),
+      sendReinforcementRequest: (toPlayerId) => dispatch({ type: "send_reinforcement", toPlayerId }),
+      respondToReinforcementRequest: (accept) => dispatch({ type: "respond_reinforcement", accept }),
+      submitDonation: (entries) => dispatch({ type: "submit_donation", entries }),
+      endTurn: () => dispatch({ type: "end_turn" }),
+      runAITurn: async () => undefined
+    });
+
+    return () => {
+      useGameStore.setState({
+        attemptUnitAction: original.attemptUnitAction,
+        queueAnimatedUnitAction: original.queueAnimatedUnitAction,
+        unlockTech: original.unlockTech,
+        produceUnit: original.produceUnit,
+        healUnit: original.healUnit,
+        sendPeaceTreaty: original.sendPeaceTreaty,
+        respondToPeaceTreaty: original.respondToPeaceTreaty,
+        breakPeaceTreaty: original.breakPeaceTreaty,
+        sendReinforcementRequest: original.sendReinforcementRequest,
+        respondToReinforcementRequest: original.respondToReinforcementRequest,
+        submitDonation: original.submitDonation,
+        endTurn: original.endTurn,
+        runAITurn: original.runAITurn
+      });
+    };
+  }, [multiplayerEnabled, sendAction]);
 
   useEffect(() => {
     (window as Window & { render_game_to_text?: () => string; advanceTime?: (ms: number) => void }).render_game_to_text = () =>
@@ -154,9 +267,10 @@ export function GamePageClient() {
   }, [actionAnimationBusy, currentPlayerId, diplomacyLog, fogOfWar, gameOver, lastCombatTurnByPair, players, setup.mapSize, setup.matchInitialized, tiles, turnNumber, units, villages]);
 
   useEffect(() => {
+    if (multiplayerEnabled) return;
     if (!setup.matchInitialized || gameOver || !currentPlayerIsAI || aiTurnInProgress) return;
     void runAITurn();
-  }, [aiTurnInProgress, currentPlayerIsAI, gameOver, runAITurn, setup.matchInitialized]);
+  }, [aiTurnInProgress, currentPlayerIsAI, gameOver, multiplayerEnabled, runAITurn, setup.matchInitialized]);
 
   const contactDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -190,7 +304,21 @@ export function GamePageClient() {
     return () => { if (reinforcementDismissRef.current) clearTimeout(reinforcementDismissRef.current); };
   }, [reinforcementNotification, dismissReinforcementNotification]);
 
-  if (!setup.matchInitialized || players.length === 0) {
+  if (multiplayerEnabled && !match) {
+    return (
+      <main className="min-h-screen bg-[#050812] px-4 py-10">
+        <div className="mx-auto flex min-h-[88vh] max-w-4xl items-center justify-center">
+          <Card className="w-full max-w-xl border-slate-700/60 bg-slate-950/65 p-8 text-center">
+            <h1 className="text-3xl font-bold text-white">{t.game.syncingState}</h1>
+            <p className="mt-3 text-slate-300">{matchSyncing ? t.game.reconnectingToMatch : t.game.waitingForOtherPlayers}</p>
+            {matchError && <p className="mt-3 text-rose-300">{t.game.actionFailed}: {matchError}</p>}
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  if (!multiplayerEnabled && (!setup.matchInitialized || players.length === 0)) {
     return (
       <main className="min-h-screen bg-[#050812] px-4 py-10">
         <div className="mx-auto flex min-h-[88vh] max-w-4xl items-center justify-center">
@@ -287,6 +415,12 @@ export function GamePageClient() {
         <div className="fixed left-1/2 top-36 z-50 -translate-x-1/2 rounded-lg border border-sky-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-sky-900/30 text-center">
           <p className="text-sm font-semibold text-sky-200">🪖 {reinforcementNotification}</p>
           <button onClick={dismissReinforcementNotification} className="mt-1 text-xs text-slate-400 hover:text-slate-200">{t.game.dismiss}</button>
+        </div>
+      )}
+
+      {multiplayerEnabled && multiplayerErrorText && (
+        <div className="fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-lg border border-rose-500/50 bg-slate-900/95 px-6 py-3 shadow-lg shadow-rose-900/30 text-center">
+          <p className="text-sm font-semibold text-rose-200">{multiplayerErrorText}</p>
         </div>
       )}
 

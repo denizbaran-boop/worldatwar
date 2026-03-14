@@ -315,3 +315,63 @@ Validation:
     - `output/web-game-ai-strategy-check/shot-0.png`
     - `output/web-game-ai-strategy-check/state-0.json`
     - No `errors-0.json` was produced.
+
+- Multiplayer architecture upgrade implemented to server-authoritative match sync.
+  - Added server match domain modules:
+    - `server/src/match/matchTypes.ts`
+    - `server/src/match/matchStore.ts`
+    - `server/src/match/matchManager.ts`
+    - `server/src/actions/matchActions.ts`
+    - `server/src/validation/matchValidation.ts`
+  - Updated room lifecycle for synchronized setup config and status transitions:
+    - Added `room:config_update` flow and typed `RoomGameConfig` in `server/src/types.ts` + `server/src/rooms/roomManager.ts`.
+  - Extended Socket.IO server (`server/src/index.ts`) with multiplayer gameplay events:
+    - `match:create`, `match:state`, `match:reconnect`, `match:action`, `match:updated`, `match:turnEnded`, `match:finished`, `match:error`.
+    - Per-player filtered match snapshots are emitted using server-owned fog/visibility.
+
+- Client multiplayer sync integration:
+  - Added typed match models in `src/lib/multiplayer/types.ts`.
+  - Added `src/lib/multiplayer/useMatch.ts` for match snapshot/action event handling.
+  - Extended `useRoom` with:
+    - `updateRoomConfig`, `createMatch`
+    - reconnect fix when socket is already connected (call `onConnect()` immediately).
+  - Updated `/setup` flow (`src/app/setup/page.tsx`):
+    - synchronized setup values from room config
+    - host-controlled setup updates via socket
+    - host creates server match from setup screen
+    - all clients auto-transition to `/game` when room status becomes `in_game`.
+  - Updated game page (`src/components/game/GamePageClient.tsx`):
+    - mirrors server `MatchState` into Zustand render state
+    - overrides gameplay mutators in multiplayer mode to emit typed intents instead of local simulation
+    - disables local AI execution in multiplayer mode
+    - adds syncing and multiplayer-action error UI.
+
+- Localization update:
+  - Added multiplayer sync/error keys in all languages (EN/TR/ES/PT/DE/RU):
+    - not your turn, invalid move, reconnecting to match, waiting for other players, host configuring match, match started, player disconnected, player reconnected, action failed, synchronizing game state.
+
+- Docs update:
+  - Rewrote `MULTIPLAYER.md` to describe server-authoritative gameplay architecture, lifecycle, action/validation flow, reconnect behavior, and persistence abstraction.
+
+Validation:
+- `npm run typecheck` passed.
+- `npm run build` (frontend) passed.
+- `npm run build` (server) passed.
+- `npm run lint` remains incompatible in this workspace due Next/ESLint CLI config mismatch (`next lint` and ESLint v9 flat-config expectations).
+
+Manual multiplayer verification (2 browser sessions):
+- Started frontend dev server + Socket.IO server.
+- Ran Playwright smoke test script `tmp/multiplayer_smoke.mjs` (host + client contexts):
+  - host creates room, client joins, host starts lobby setup + match creation
+  - both clients reached `/game`
+  - both received synchronized state (`turnNumber/currentPlayerId` matched)
+  - host ended turn; both sessions updated to the same next active player.
+- Captured and visually inspected screenshots:
+  - `output/multiplayer-host-debug.png`
+  - `output/multiplayer-client-debug.png`
+  - Confirmed synchronized but perspective-filtered fog/unit visibility between players.
+
+TODO / next agent suggestions:
+- Expand server action reducer parity for advanced diplomacy/reinforcement branches to fully match single-player local store behavior edge-cases.
+- Add automated CI e2e test for multiplayer reconnect mid-turn and for invalid-action rejection surface messages.
+- Align lint tooling (`next lint` + ESLint v9 flat config) so lint can run reliably in this repo.

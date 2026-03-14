@@ -10,7 +10,17 @@ import {
   kickPlayer,
   startRoom,
   markDisconnected,
+  getRoom,
+  updateRoomConfig,
+  setRoomStatus
 } from "./rooms/roomManager";
+import {
+  applyMatchAction,
+  createMatchForRoom,
+  getMatch,
+  getPerspectiveState,
+  removeMatch
+} from "./match/matchManager";
 import type {
   CreateRoomPayload,
   JoinRoomPayload,
@@ -19,9 +29,11 @@ import type {
   KickPayload,
   StartRoomPayload,
   GameRoom,
+  UpdateRoomConfigPayload
 } from "./types";
+import type { MatchActionPayload, MatchCreatePayload, MatchReconnectPayload } from "./match/matchTypes";
 
-// ── Server setup ──────────────────────────────────────────────────────────────
+// Server setup
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,16 +41,12 @@ const httpServer = createServer(app);
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 
-const CORS_ORIGINS = [
-  FRONTEND_URL,
-  "http://localhost:3000",
-  "http://localhost:3001",
-];
+const CORS_ORIGINS = [FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"];
 
 const io = new Server(httpServer, {
   cors: { origin: CORS_ORIGINS, methods: ["GET", "POST"] },
   pingTimeout: 20000,
-  pingInterval: 10000,
+  pingInterval: 10000
 });
 
 app.use(cors({ origin: CORS_ORIGINS }));
@@ -47,8 +55,6 @@ app.use(express.json());
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
-
-// ── Per-socket tracking ───────────────────────────────────────────────────────
 
 interface SocketMeta {
   roomCode: string | null;
@@ -66,16 +72,23 @@ function meta(socket: Socket): SocketMeta {
   return m;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function broadcastUpdate(code: string, room: GameRoom) {
+function broadcastRoomUpdate(code: string, room: GameRoom) {
   io.to(code).emit("room:updated", room);
 }
 
-// ── Socket.IO connection handler ──────────────────────────────────────────────
+function emitMatchState(code: string, eventName: "match:created" | "match:state" | "match:updated") {
+  const room = getRoom(code);
+  const match = getMatch(code);
+  if (!room || !match) return;
+
+  for (const player of room.players) {
+    if (!player.socketId) continue;
+    const perspective = getPerspectiveState(match, player.id);
+    io.to(player.socketId).emit(eventName, { matchState: perspective });
+  }
+}
 
 io.on("connection", (socket) => {
-  // ── room:create ────────────────────────────────────────────────────────────
   socket.on("room:create", ({ playerName, playerId }: CreateRoomPayload) => {
     const room = createRoom(playerId, playerName);
     const m = meta(socket);
@@ -86,12 +99,11 @@ io.on("connection", (socket) => {
     socket.emit("room:created", room);
   });
 
-  // ── room:join ─────────────────────────────────────────────────────────────
   socket.on("room:join", ({ code, playerName, playerId }: JoinRoomPayload) => {
     const normalized = code.toUpperCase().trim();
     const result = joinRoom(normalized, playerId, playerName, socket.id);
 
-    if (result.error ?? !result.room) {
+    if (result.error || !result.room) {
       socket.emit("room:error", { event: "room:join", error: result.error ?? "unknown_error" });
       return;
     }
@@ -102,17 +114,14 @@ io.on("connection", (socket) => {
 
     socket.join(normalized);
     socket.emit("room:joined", result.room);
-    // Notify other room members that someone joined
     socket.to(normalized).emit("room:updated", result.room);
   });
 
-  // ── room:reconnect ────────────────────────────────────────────────────────
   socket.on("room:reconnect", ({ code, playerId }: ReconnectPayload) => {
     const normalized = code.toUpperCase().trim();
     const result = reconnectToRoom(normalized, playerId, socket.id);
 
-    if (result.error ?? !result.room) {
-      // Silently ignore failed reconnects — room may have expired
+    if (result.error || !result.room) {
       socket.emit("room:reconnect_failed", { error: result.error ?? "unknown_error" });
       return;
     }
@@ -124,9 +133,15 @@ io.on("connection", (socket) => {
     socket.join(normalized);
     socket.emit("room:joined", result.room);
     socket.to(normalized).emit("room:updated", result.room);
+
+    if (result.room.status === "in_game") {
+      const match = getMatch(normalized);
+      if (match) {
+        socket.emit("match:state", { matchState: getPerspectiveState(match, playerId) });
+      }
+    }
   });
 
-  // ── room:leave ────────────────────────────────────────────────────────────
   socket.on("room:leave", ({ code, playerId }: LeaveRoomPayload) => {
     const normalized = code.toUpperCase().trim();
     const updatedRoom = leaveRoom(normalized, playerId);
@@ -140,38 +155,101 @@ io.on("connection", (socket) => {
 
     if (updatedRoom) {
       io.to(normalized).emit("room:updated", updatedRoom);
+      return;
     }
+
+    removeMatch(normalized);
   });
 
-  // ── room:kick ─────────────────────────────────────────────────────────────
   socket.on("room:kick", ({ code, hostId, targetId }: KickPayload) => {
     const normalized = code.toUpperCase().trim();
     const result = kickPlayer(normalized, hostId, targetId);
 
-    if (result.error ?? !result.room) {
+    if (result.error || !result.room) {
       socket.emit("room:error", { event: "room:kick", error: result.error ?? "unknown_error" });
       return;
     }
 
-    // Tell everyone (including kicked player) the updated state + who was kicked
     io.to(normalized).emit("room:kicked", { room: result.room, kickedId: targetId });
   });
 
-  // ── room:start ────────────────────────────────────────────────────────────
   socket.on("room:start", ({ code, hostId }: StartRoomPayload) => {
     const normalized = code.toUpperCase().trim();
     const result = startRoom(normalized, hostId);
 
-    if (result.error ?? !result.room) {
+    if (result.error || !result.room) {
       socket.emit("room:error", { event: "room:start", error: result.error ?? "unknown_error" });
       return;
     }
 
-    // Broadcast game start to every client in the room simultaneously
     io.to(normalized).emit("room:started", result.room);
   });
 
-  // ── disconnect ────────────────────────────────────────────────────────────
+  socket.on("room:config_update", ({ code, hostId, config }: UpdateRoomConfigPayload) => {
+    const normalized = code.toUpperCase().trim();
+    const result = updateRoomConfig(normalized, hostId, config);
+    if (result.error || !result.room) {
+      socket.emit("room:error", { event: "room:config_update", error: result.error ?? "unknown_error" });
+      return;
+    }
+    io.to(normalized).emit("room:updated", result.room);
+  });
+
+  socket.on("match:create", ({ roomCode, hostId }: MatchCreatePayload) => {
+    const normalized = roomCode.toUpperCase().trim();
+    const room = getRoom(normalized);
+    if (!room) {
+      socket.emit("match:error", { event: "match:create", error: "room_not_found" });
+      return;
+    }
+
+    const created = createMatchForRoom(room, hostId);
+    if (created.error || !created.match) {
+      socket.emit("match:error", { event: "match:create", error: created.error ?? "match_create_failed" });
+      return;
+    }
+
+    const roomUpdate = setRoomStatus(normalized, "in_game");
+    if (roomUpdate.room) {
+      io.to(normalized).emit("room:updated", roomUpdate.room);
+    }
+
+    emitMatchState(normalized, "match:created");
+  });
+
+  socket.on("match:action", ({ roomCode, lobbyPlayerId, action }: MatchActionPayload) => {
+    const normalized = roomCode.toUpperCase().trim();
+    const result = applyMatchAction(normalized, lobbyPlayerId, action);
+
+    if (result.error || !result.match) {
+      socket.emit("match:error", { event: "match:action", error: result.error ?? "action_failed" });
+      return;
+    }
+
+    emitMatchState(normalized, "match:updated");
+
+    if (action.type === "end_turn") {
+      io.to(normalized).emit("match:turnEnded", { turnNumber: result.match.turnNumber, currentPlayerId: result.match.currentPlayerId });
+    }
+
+    if (result.match.phase === "finished") {
+      io.to(normalized).emit("match:finished", { winner: result.match.winner, ranking: result.match.ranking });
+      const roomUpdate = setRoomStatus(normalized, "finished");
+      if (roomUpdate.room) io.to(normalized).emit("room:updated", roomUpdate.room);
+    }
+  });
+
+  socket.on("match:reconnect", ({ roomCode, lobbyPlayerId }: MatchReconnectPayload) => {
+    const normalized = roomCode.toUpperCase().trim();
+    const match = getMatch(normalized);
+    if (!match) {
+      socket.emit("match:error", { event: "match:reconnect", error: "match_not_found" });
+      return;
+    }
+
+    socket.emit("match:state", { matchState: getPerspectiveState(match, lobbyPlayerId) });
+  });
+
   socket.on("disconnect", () => {
     const m = socketMeta.get(socket.id);
     socketMeta.delete(socket.id);
@@ -179,13 +257,11 @@ io.on("connection", (socket) => {
     if (m?.roomCode && m?.playerId) {
       const updatedRoom = markDisconnected(m.roomCode, m.playerId);
       if (updatedRoom) {
-        broadcastUpdate(m.roomCode, updatedRoom);
+        broadcastRoomUpdate(m.roomCode, updatedRoom);
       }
     }
   });
 });
-
-// ── Start ─────────────────────────────────────────────────────────────────────
 
 httpServer.listen(PORT, () => {
   console.log(`[WorldAtWar] Realtime server running on :${PORT}`);

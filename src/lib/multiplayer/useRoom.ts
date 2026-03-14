@@ -7,9 +7,8 @@ import type {
   KickedPayload,
   RoomErrorCode,
   RoomErrorPayload,
+  RoomGameConfig
 } from "./types";
-
-// ── LocalStorage persistence keys ────────────────────────────────────────────
 
 const STORAGE_KEY = "worldatwar_player";
 
@@ -25,7 +24,7 @@ function loadStoredPlayer(): StoredPlayer {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw) as StoredPlayer;
   } catch {
-    // ignore JSON parse errors
+    // ignore parse errors
   }
   return { playerId: "", playerName: "" };
 }
@@ -44,18 +43,11 @@ function makePlayerId(): string {
   return `player_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-// ── Hook return type ──────────────────────────────────────────────────────────
-
 export type RoomHookState = {
-  /** Socket transport is established */
   connected: boolean;
-  /** Socket is in the process of connecting / reconnecting */
   connecting: boolean;
-  /** Current room state — null when not in a room */
   room: GameRoom | null;
-  /** Last room-level error code */
   error: RoomErrorCode | null;
-  /** True for the turn after the local player was kicked */
   wasKicked: boolean;
   localPlayerId: string;
   localPlayerName: string;
@@ -67,28 +59,26 @@ export type RoomHookActions = {
   leaveRoom: () => void;
   kickPlayer: (targetId: string) => void;
   startGame: () => void;
+  updateRoomConfig: (config: Partial<RoomGameConfig>) => void;
+  createMatch: () => void;
   clearError: () => void;
   clearKicked: () => void;
   setLocalPlayerName: (name: string) => void;
 };
 
-// ── useRoom hook ──────────────────────────────────────────────────────────────
-
 export function useRoom(): RoomHookState & RoomHookActions {
-  const [connected, setConnected]   = useState(false);
+  const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(true);
-  const [room, setRoom]             = useState<GameRoom | null>(null);
-  const [error, setError]           = useState<RoomErrorCode | null>(null);
-  const [wasKicked, setWasKicked]   = useState(false);
+  const [room, setRoom] = useState<GameRoom | null>(null);
+  const [error, setError] = useState<RoomErrorCode | null>(null);
+  const [wasKicked, setWasKicked] = useState(false);
 
-  // Stable refs for values used inside callbacks that must not change identity
   const playerRef = useRef<StoredPlayer>({ playerId: "", playerName: "" });
-  const roomRef   = useRef<GameRoom | null>(null);
+  const roomRef = useRef<GameRoom | null>(null);
 
-  const [localPlayerId, setLocalPlayerId]     = useState("");
+  const [localPlayerId, setLocalPlayerId] = useState("");
   const [localPlayerName, setLocalPlayerNameState] = useState("");
 
-  // ── Initialize player identity on mount ──────────────────────────────────
   useEffect(() => {
     const stored = loadStoredPlayer();
     const id = stored.playerId || makePlayerId();
@@ -99,21 +89,19 @@ export function useRoom(): RoomHookState & RoomHookActions {
     setLocalPlayerNameState(stored.playerName ?? "");
   }, []);
 
-  // Keep roomRef in sync
-  useEffect(() => { roomRef.current = room; }, [room]);
-
-  // ── Socket lifecycle ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!localPlayerId) return; // wait for identity to be initialised
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    if (!localPlayerId) return;
 
     const socket = getSocket();
 
-    // ── connect / disconnect ────────────────────────────────────────────────
     const onConnect = () => {
       setConnected(true);
       setConnecting(false);
 
-      // Attempt to restore a previous room on reconnect
       const { activeRoomCode, playerId } = playerRef.current;
       if (activeRoomCode && playerId) {
         socket.emit("room:reconnect", { code: activeRoomCode, playerId });
@@ -125,7 +113,6 @@ export function useRoom(): RoomHookState & RoomHookActions {
       setConnecting(true);
     };
 
-    // ── room events ─────────────────────────────────────────────────────────
     const onRoomCreated = (r: GameRoom) => {
       setRoom(r);
       setError(null);
@@ -165,34 +152,34 @@ export function useRoom(): RoomHookState & RoomHookActions {
       setError(err);
     };
 
-    // Register all listeners
-    socket.on("connect",          onConnect);
-    socket.on("disconnect",       onDisconnect);
-    socket.on("room:created",     onRoomCreated);
-    socket.on("room:joined",      onRoomJoined);
-    socket.on("room:updated",     onRoomUpdated);
-    socket.on("room:kicked",      onRoomKicked);
-    socket.on("room:started",     onRoomStarted);
-    socket.on("room:left",        onRoomLeft);
-    socket.on("room:error",       onRoomError);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("room:created", onRoomCreated);
+    socket.on("room:joined", onRoomJoined);
+    socket.on("room:updated", onRoomUpdated);
+    socket.on("room:kicked", onRoomKicked);
+    socket.on("room:started", onRoomStarted);
+    socket.on("room:left", onRoomLeft);
+    socket.on("room:error", onRoomError);
 
-    // Connect (idempotent if already connected)
-    if (!socket.connected) socket.connect();
+    if (socket.connected) {
+      onConnect();
+    } else {
+      socket.connect();
+    }
 
     return () => {
-      socket.off("connect",       onConnect);
-      socket.off("disconnect",    onDisconnect);
-      socket.off("room:created",  onRoomCreated);
-      socket.off("room:joined",   onRoomJoined);
-      socket.off("room:updated",  onRoomUpdated);
-      socket.off("room:kicked",   onRoomKicked);
-      socket.off("room:started",  onRoomStarted);
-      socket.off("room:left",     onRoomLeft);
-      socket.off("room:error",    onRoomError);
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("room:created", onRoomCreated);
+      socket.off("room:joined", onRoomJoined);
+      socket.off("room:updated", onRoomUpdated);
+      socket.off("room:kicked", onRoomKicked);
+      socket.off("room:started", onRoomStarted);
+      socket.off("room:left", onRoomLeft);
+      socket.off("room:error", onRoomError);
     };
   }, [localPlayerId]);
-
-  // ── Actions ───────────────────────────────────────────────────────────────
 
   const createRoom = useCallback((playerName: string) => {
     playerRef.current.playerName = playerName;
@@ -200,7 +187,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
     setLocalPlayerNameState(playerName);
     getSocket().emit("room:create", {
       playerName,
-      playerId: playerRef.current.playerId,
+      playerId: playerRef.current.playerId
     });
   }, []);
 
@@ -212,7 +199,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
     getSocket().emit("room:join", {
       code: code.toUpperCase().trim(),
       playerName,
-      playerId: playerRef.current.playerId,
+      playerId: playerRef.current.playerId
     });
   }, []);
 
@@ -221,7 +208,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
     if (!r) return;
     getSocket().emit("room:leave", {
       code: r.code,
-      playerId: playerRef.current.playerId,
+      playerId: playerRef.current.playerId
     });
     setRoom(null);
     saveStoredPlayer({ activeRoomCode: undefined });
@@ -233,7 +220,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
     getSocket().emit("room:kick", {
       code: r.code,
       hostId: playerRef.current.playerId,
-      targetId,
+      targetId
     });
   }, []);
 
@@ -242,11 +229,30 @@ export function useRoom(): RoomHookState & RoomHookActions {
     if (!r) return;
     getSocket().emit("room:start", {
       code: r.code,
-      hostId: playerRef.current.playerId,
+      hostId: playerRef.current.playerId
     });
   }, []);
 
-  const clearError  = useCallback(() => setError(null), []);
+  const updateRoomConfig = useCallback((config: Partial<RoomGameConfig>) => {
+    const r = roomRef.current;
+    if (!r) return;
+    getSocket().emit("room:config_update", {
+      code: r.code,
+      hostId: playerRef.current.playerId,
+      config
+    });
+  }, []);
+
+  const createMatch = useCallback(() => {
+    const r = roomRef.current;
+    if (!r) return;
+    getSocket().emit("match:create", {
+      roomCode: r.code,
+      hostId: playerRef.current.playerId
+    });
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
   const clearKicked = useCallback(() => setWasKicked(false), []);
 
   const setLocalPlayerName = useCallback((name: string) => {
@@ -268,8 +274,10 @@ export function useRoom(): RoomHookState & RoomHookActions {
     leaveRoom,
     kickPlayer,
     startGame,
+    updateRoomConfig,
+    createMatch,
     clearError,
     clearKicked,
-    setLocalPlayerName,
+    setLocalPlayerName
   };
 }
