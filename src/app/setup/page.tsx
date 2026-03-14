@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useShallow } from "zustand/react/shallow";
 import { PlayOptionsCard } from "@/components/menu/PlayOptionsCard";
@@ -10,14 +10,7 @@ import { JoinGameModal } from "@/components/game/JoinGameModal";
 import { LobbyScreen } from "@/components/game/LobbyScreen";
 import type { PlayerColor } from "@/lib/game/types";
 import { useGameStore } from "@/store/gameStore";
-import {
-  createRoom,
-  joinRoom,
-  leaveRoom,
-  kickPlayer,
-  generatePlayerId,
-  type GameRoom,
-} from "@/lib/game/gameRoomManager";
+import { useRoom } from "@/lib/multiplayer/useRoom";
 
 type SetupStep = "options" | "name" | "join" | "lobby" | "config";
 type PendingAction = "create" | "join";
@@ -32,96 +25,112 @@ export default function SetupPage() {
     }))
   );
 
-  const [step, setStep] = useState<SetupStep>("options");
-  const [pendingAction, setPendingAction] = useState<PendingAction>("create");
-  const [joinError, setJoinError] = useState(false);
-  const [currentRoom, setCurrentRoom] = useState<GameRoom | null>(null);
+  const [step, setStep]                     = useState<SetupStep>("options");
+  const [pendingAction, setPendingAction]   = useState<PendingAction>("create");
+  const [pendingName, setPendingName]       = useState("");
 
-  // Generate a stable player ID for this browser session
-  const localPlayerIdRef = useRef<string>(generatePlayerId());
-  const localPlayerId = localPlayerIdRef.current;
+  // ── Multiplayer room hook ──────────────────────────────────────────────────
+  const {
+    connected,
+    connecting,
+    room,
+    error,
+    wasKicked,
+    localPlayerId,
+    createRoom: socketCreate,
+    joinRoom:   socketJoin,
+    leaveRoom:  socketLeave,
+    kickPlayer: socketKick,
+    startGame:  socketStart,
+    clearError,
+    clearKicked,
+    setLocalPlayerName,
+  } = useRoom();
 
-  // ── Setup config handlers (unchanged) ──────────────────────────────────────
-  const onPlayerCountChange = (count: number) => {
+  // ── React to room events ──────────────────────────────────────────────────
+
+  // Room appears → enter lobby
+  useEffect(() => {
+    if (room && step !== "lobby" && step !== "config") {
+      setStep("lobby");
+    }
+  }, [room, step]);
+
+  // Room status becomes "setup" → all clients navigate to config together
+  useEffect(() => {
+    if (room?.status === "setup") {
+      const count = Math.min(5, Math.max(2, room.players.length));
+      setSetup({ playerCount: count });
+      setStep("config");
+    }
+  }, [room?.status, room?.players.length, setSetup]);
+
+  // Kicked → return to options
+  useEffect(() => {
+    if (wasKicked) {
+      setStep("options");
+      clearKicked();
+    }
+  }, [wasKicked, clearKicked]);
+
+  // ── Setup config handlers (unchanged from before) ─────────────────────────
+  const onPlayerCountChange = (count: number) =>
     setSetup({ playerCount: Math.min(5, Math.max(2, count)) });
-  };
-  const onLocalColorChange = (color: PlayerColor) => setSetup({ localPlayerColor: color });
-  const onGameModeChange = (mode: "pvp" | "pvai") => setSetup({ gameMode: mode });
-  const onAICountChange = (count: number) => setSetup({ aiCount: count });
-  const onAIDifficultyChange = (difficulty: "easy" | "normal" | "hard") =>
-    setSetup({ aiDifficulty: difficulty });
-  const onMapSizeChange = (size: "small" | "medium" | "large") => setSetup({ mapSize: size });
+  const onLocalColorChange  = (color: PlayerColor) => setSetup({ localPlayerColor: color });
+  const onGameModeChange    = (mode: "pvp" | "pvai") => setSetup({ gameMode: mode });
+  const onAICountChange     = (count: number) => setSetup({ aiCount: count });
+  const onAIDifficultyChange = (d: "easy" | "normal" | "hard") => setSetup({ aiDifficulty: d });
+  const onMapSizeChange     = (size: "small" | "medium" | "large") => setSetup({ mapSize: size });
 
   const onStartMatch = () => {
     startLocalMatch();
     router.push("/game");
   };
 
-  // ── Lobby flow handlers ─────────────────────────────────────────────────────
+  // ── Lobby flow handlers ───────────────────────────────────────────────────
+
   const handleNameConfirm = (name: string) => {
+    setPendingName(name);
+    setLocalPlayerName(name);
     if (pendingAction === "create") {
-      const room = createRoom(localPlayerId, name);
-      setCurrentRoom(room);
-      setStep("lobby");
+      socketCreate(name);
+      // room:created event will trigger the useEffect → lobby step
     } else {
-      // Store name temporarily then show code input
-      // We'll pass the name along when the code is submitted
-      sessionStorage.setItem("lobby_pending_name", name);
       setStep("join");
     }
   };
 
   const handleJoinCode = (code: string) => {
-    const name = sessionStorage.getItem("lobby_pending_name") ?? "Commander";
-    const room = joinRoom(code, localPlayerId, name);
-    if (!room) {
-      setJoinError(true);
-      return;
-    }
-    setJoinError(false);
-    setCurrentRoom(room);
-    // Pre-configure player count to match lobby size
-    setSetup({ playerCount: Math.min(5, Math.max(2, room.players.length)) });
-    setStep("lobby");
+    clearError();
+    socketJoin(code, pendingName);
+    // room:joined → useEffect → lobby  /  room:error → error state stays
   };
 
   const handleLeave = () => {
-    if (currentRoom) {
-      leaveRoom(currentRoom.code, localPlayerId);
-      setCurrentRoom(null);
-    }
+    socketLeave();
     setStep("options");
   };
 
   const handleKick = (targetId: string) => {
-    if (!currentRoom) return;
-    const updated = kickPlayer(currentRoom.code, localPlayerId, targetId);
-    if (updated) setCurrentRoom(updated);
+    socketKick(targetId);
   };
 
   const handleStartGame = () => {
-    if (!currentRoom) return;
-    // Set player count to match lobby (capped at game limits)
-    const count = Math.min(5, Math.max(2, currentRoom.players.length));
-    setSetup({ playerCount: count });
-    setStep("config");
+    socketStart();
+    // room:started → room.status = "setup" → useEffect transitions all clients
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-map-glow px-4 py-10">
       <div className="mx-auto flex min-h-[88vh] max-w-6xl items-center justify-center">
+
         {step === "options" && (
           <PlayOptionsCard
-            onCreateGame={() => {
-              setPendingAction("create");
-              setStep("name");
-            }}
-            onJoinGame={() => {
-              setPendingAction("join");
-              setStep("name");
-            }}
+            onCreateGame={() => { setPendingAction("create"); setStep("name"); }}
+            onJoinGame={()   => { setPendingAction("join");   setStep("name"); }}
             onBack={() => router.push("/")}
+            connecting={connecting}
           />
         )}
 
@@ -139,13 +148,14 @@ export default function SetupPage() {
             onGameModeChange={onGameModeChange}
             onAIDifficultyChange={onAIDifficultyChange}
             onMapSizeChange={onMapSizeChange}
-            onBack={() => setStep(currentRoom ? "lobby" : "options")}
+            onBack={() => setStep(room ? "lobby" : "options")}
             onStartMatch={onStartMatch}
           />
         )}
       </div>
 
-      {/* Modals rendered above the page content */}
+      {/* ── Modals ─────────────────────────────────────────────────────────── */}
+
       {step === "name" && (
         <PlayerNameModal
           onConfirm={handleNameConfirm}
@@ -157,15 +167,16 @@ export default function SetupPage() {
         <JoinGameModal
           onJoin={handleJoinCode}
           onBack={() => setStep("name")}
-          error={joinError ? "not-found" : undefined}
+          error={error}
         />
       )}
 
-      {step === "lobby" && currentRoom && (
+      {step === "lobby" && room && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <LobbyScreen
-            room={currentRoom}
+            room={room}
             localPlayerId={localPlayerId}
+            connected={connected}
             onStartGame={handleStartGame}
             onLeave={handleLeave}
             onKick={handleKick}

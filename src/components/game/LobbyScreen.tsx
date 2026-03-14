@@ -4,17 +4,25 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
-import type { GameRoom } from "@/lib/game/gameRoomManager";
+import type { GameRoom } from "@/lib/multiplayer/types";
 
 type Props = {
   room: GameRoom;
   localPlayerId: string;
+  connected: boolean;
   onStartGame: () => void;
   onLeave: () => void;
   onKick: (targetId: string) => void;
 };
 
-export function LobbyScreen({ room, localPlayerId, onStartGame, onLeave, onKick }: Props) {
+export function LobbyScreen({
+  room,
+  localPlayerId,
+  connected,
+  onStartGame,
+  onLeave,
+  onKick,
+}: Props) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
@@ -58,6 +66,17 @@ export function LobbyScreen({ room, localPlayerId, onStartGame, onLeave, onKick 
           <p className="text-sm font-semibold text-slate-200">
             {room.players.length} / {room.maxPlayers} {t.lobby.players}
           </p>
+          {/* Connection indicator */}
+          <div className="mt-1 flex items-center justify-end gap-1.5">
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                connected ? "bg-green-400" : "bg-amber-400 animate-pulse"
+              }`}
+            />
+            <span className="text-[10px] text-slate-500">
+              {connected ? "Online" : t.lobby.reconnecting}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -70,12 +89,30 @@ export function LobbyScreen({ room, localPlayerId, onStartGame, onLeave, onKick 
             {room.players.map((player) => (
               <li key={player.id} className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-2.5">
+                  {/* Online/offline dot */}
                   <span
-                    className={`h-2 w-2 rounded-full ${
-                      player.isHost ? "bg-cyan-400" : "bg-slate-500"
+                    className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                      player.connectionStatus === "disconnected"
+                        ? "bg-slate-600"
+                        : player.isHost
+                        ? "bg-cyan-400"
+                        : "bg-green-500"
                     }`}
                   />
-                  <span className="text-sm font-medium text-slate-100">{player.name}</span>
+                  <span
+                    className={`text-sm font-medium ${
+                      player.connectionStatus === "disconnected"
+                        ? "text-slate-500"
+                        : "text-slate-100"
+                    }`}
+                  >
+                    {player.name}
+                    {player.connectionStatus === "disconnected" && (
+                      <span className="ml-1.5 text-xs text-slate-600">
+                        ({t.lobby.disconnected})
+                      </span>
+                    )}
+                  </span>
                   {player.isHost && (
                     <span className="rounded border border-cyan-600/50 bg-cyan-900/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300">
                       {t.lobby.host}
@@ -101,9 +138,9 @@ export function LobbyScreen({ room, localPlayerId, onStartGame, onLeave, onKick 
         )}
       </div>
 
-      {/* Waiting hint for non-host */}
+      {/* Status hint */}
       {!isHost && (
-        <p className="mb-5 text-sm text-slate-400 text-center">{t.lobby.waitingForPlayers}</p>
+        <p className="mb-5 text-sm text-slate-400 text-center">{t.lobby.waitingForHost}</p>
       )}
 
       {/* Actions */}
@@ -115,7 +152,7 @@ export function LobbyScreen({ room, localPlayerId, onStartGame, onLeave, onKick 
           <Button
             variant="primary"
             onClick={onStartGame}
-            disabled={room.players.length < 1}
+            disabled={!connected || room.players.length < 1}
             className="flex-1"
           >
             {t.lobby.startGame}

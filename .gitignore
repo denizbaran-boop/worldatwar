@@ -37,3 +37,10 @@ yarn-error.log*
 
 # Misc
 *.pem
+
+# Socket.IO server build output
+server/dist/
+server/node_modules/
+
+# Local env
+.env.local

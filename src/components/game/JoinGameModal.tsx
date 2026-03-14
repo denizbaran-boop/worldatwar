@@ -4,16 +4,29 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
+import type { RoomErrorCode } from "@/lib/multiplayer/types";
 
 type Props = {
   onJoin: (code: string) => void;
   onBack: () => void;
-  error?: string;
+  error?: RoomErrorCode | null;
 };
+
+function useErrorMessage(error: RoomErrorCode | null | undefined) {
+  const { t } = useTranslation();
+  if (!error) return null;
+  switch (error) {
+    case "room_not_found":   return t.lobby.gameNotFound;
+    case "room_full":        return t.lobby.roomFull;
+    case "room_not_in_lobby":return t.lobby.hostStarted;
+    default:                 return t.lobby.failedJoin;
+  }
+}
 
 export function JoinGameModal({ onJoin, onBack, error }: Props) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
+  const errorMessage = useErrorMessage(error);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,12 +48,14 @@ export function JoinGameModal({ onJoin, onBack, error }: Props) {
               type="text"
               value={code}
               maxLength={6}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setCode(e.target.value.toUpperCase());
+              }}
               placeholder={t.lobby.codePlaceholder}
               className="w-full rounded-lg border border-slate-600 bg-slate-800/80 px-4 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-white placeholder-slate-500 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 transition uppercase"
             />
-            {error && (
-              <p className="mt-2 text-sm text-rose-400">{t.lobby.gameNotFound}</p>
+            {errorMessage && (
+              <p className="mt-2 text-sm text-rose-400">{errorMessage}</p>
             )}
           </div>
           <div className="flex gap-3">
