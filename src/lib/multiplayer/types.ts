@@ -119,4 +119,5 @@ export type GameAction =
   | { type: "respond_reinforcement"; accept: boolean }
   | { type: "submit_donation"; entries: DonationEntry[] }
   | { type: "break_peace"; toPlayerId: string }
+  | { type: "surrender" }
   | { type: "end_turn" };

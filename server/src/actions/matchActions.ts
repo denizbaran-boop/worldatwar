@@ -41,6 +41,86 @@ const updatePlayerAliveState = (players: Player[], tiles: Tile[], units: Unit[])
     return { ...player, isAlive: ownsTiles || hasUnits };
   });
 
+const getAlivePlayers = (players: Player[]) => players.filter((player) => player.isAlive);
+
+const findNextAlivePlayerId = (players: Player[], currentPlayerId: string) => {
+  const alive = getAlivePlayers(players);
+  if (alive.length === 0) return null;
+  const currentIndex = alive.findIndex((player) => player.id === currentPlayerId);
+  if (currentIndex === -1) return alive[0].id;
+  return alive[(currentIndex + 1) % alive.length]?.id ?? alive[0].id;
+};
+
+const eliminateFaction = (
+  match: MatchState,
+  defeatedPlayerId: string,
+  options: { conquerorPlayerId?: string; logText?: string; logColor?: PlayerColor }
+): MatchState => {
+  const { conquerorPlayerId, logText, logColor } = options;
+  const transferTo = conquerorPlayerId ?? null;
+  const wasAlive = match.players.find((player) => player.id === defeatedPlayerId)?.isAlive ?? false;
+
+  let nextTiles = match.map.tiles.map((tile) => {
+    if (tile.ownerId !== defeatedPlayerId) return tile;
+    return {
+      ...tile,
+      ownerId: transferTo,
+      controlledByVillageId: transferTo ? tile.controlledByVillageId : null
+    };
+  });
+
+  let nextVillages = match.villages.map((village) => {
+    if (village.ownerId !== defeatedPlayerId) return village;
+    return {
+      ...village,
+      ownerId: transferTo,
+      controlledTileKeys: transferTo ? village.controlledTileKeys : []
+    };
+  });
+
+  const nextUnits = match.units.filter((unit) => unit.ownerId !== defeatedPlayerId);
+  const nextPlayers = match.players.map((player) =>
+    player.id === defeatedPlayerId ? { ...player, isAlive: false } : player
+  );
+  const nextPeaceTreaties = match.peaceTreaties.filter(
+    (treaty) => treaty.playerA !== defeatedPlayerId && treaty.playerB !== defeatedPlayerId
+  );
+
+  if (transferTo === null) {
+    const neutralVillageIds = new Set(
+      nextVillages.filter((village) => village.ownerId === null).map((village) => village.id)
+    );
+    nextTiles = nextTiles.map((tile) =>
+      tile.controlledByVillageId && neutralVillageIds.has(tile.controlledByVillageId)
+        ? { ...tile, controlledByVillageId: null }
+        : tile
+    );
+  }
+
+  const nextCurrentPlayerId =
+    match.currentPlayerId === defeatedPlayerId
+      ? findNextAlivePlayerId(nextPlayers, defeatedPlayerId) ?? match.currentPlayerId
+      : match.currentPlayerId;
+  const nextCurrentFaction =
+    nextPlayers.find((player) => player.id === nextCurrentPlayerId)?.color ?? match.currentFaction;
+
+  return {
+    ...match,
+    map: { ...match.map, tiles: nextTiles },
+    villages: nextVillages,
+    units: nextUnits,
+    players: nextPlayers,
+    peaceTreaties: nextPeaceTreaties,
+    justBrokePeace: match.justBrokePeace.filter((entry) => entry !== defeatedPlayerId),
+    currentPlayerId: nextCurrentPlayerId,
+    currentFaction: nextCurrentFaction,
+    gameLog:
+      wasAlive && logText
+        ? [...match.gameLog, createLog(match.turnNumber, logText, logColor)]
+        : match.gameLog
+  };
+};
+
 const getCapitalOwnerIds = (tiles: Tile[]) =>
   Array.from(new Set(tiles.filter((tile) => tile.isCapital && tile.ownerId).map((tile) => tile.ownerId as string)));
 
@@ -78,21 +158,39 @@ const finalizeMatchState = (match: MatchState): MatchState => {
   const visibleTiles = computeVisibleTiles(match.players, match.units, match.map.tiles);
   const exploredTiles = mergeExplored(match.exploredTiles, visibleTiles);
   const players = updatePlayerAliveState(match.players, match.map.tiles, match.units);
+  const alivePlayers = getAlivePlayers(players);
   const capitalOwners = getCapitalOwnerIds(match.map.tiles);
-  const winnerId = capitalOwners.length === 1 ? capitalOwners[0] : null;
+  const winnerByAlive = alivePlayers.length === 1 ? alivePlayers[0].id : null;
+  const winnerByCapitals = capitalOwners.length === 1 ? capitalOwners[0] : null;
+  const winnerId = winnerByAlive ?? winnerByCapitals ?? null;
   const winnerPlayer = winnerId ? players.find((player) => player.id === winnerId) ?? null : null;
-  const gameOver = Boolean(winnerId);
+  const gameOver = alivePlayers.length <= 1 || Boolean(winnerId);
+  const gameOverReason = winnerPlayer
+    ? winnerByAlive
+      ? `${winnerPlayer.color} is the last remaining commander.`
+      : `${winnerPlayer.color} controls all capitals.`
+    : alivePlayers.length === 0
+      ? "All factions eliminated."
+      : match.gameOverReason;
+  const settledCurrentPlayerId =
+    players.some((player) => player.id === match.currentPlayerId && player.isAlive)
+      ? match.currentPlayerId
+      : findNextAlivePlayerId(players, match.currentPlayerId) ?? match.currentPlayerId;
+  const settledCurrentFaction =
+    players.find((player) => player.id === settledCurrentPlayerId)?.color ?? match.currentFaction;
 
   return {
     ...match,
     players,
+    currentPlayerId: settledCurrentPlayerId,
+    currentFaction: settledCurrentFaction,
     exploredTiles,
     visibleTiles,
     fogOfWar: exploredTiles,
     factionContactPairs: syncContacts(match.map.tiles, match.factionContactPairs),
     gameOver,
     phase: gameOver ? "finished" : match.phase,
-    gameOverReason: winnerPlayer ? `${winnerPlayer.color} controls all capitals.` : match.gameOverReason,
+    gameOverReason,
     ranking: rankPlayersByTiles(match.map.tiles, players),
     winner: winnerPlayer
       ? {
@@ -131,6 +229,8 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
 
   const isEnemyOccupied = Boolean(occupant && occupant.ownerId !== actingPlayerId);
   const isRangedAttack = Boolean(isEnemyOccupied && distance > stats.movementRange && distance <= stats.attackRange);
+  const movingIntoPeaceTerritory =
+    targetTile.ownerId !== null && arePeacePartners(match.peaceTreaties, actingPlayerId, targetTile.ownerId);
 
   if (!isRangedAttack && distance > stats.movementRange) {
     return { ok: false, error: "invalid_move_range" };
@@ -145,6 +245,7 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
   let nextVillages = [...match.villages];
   let nextLastCombatTurnByPair = { ...match.lastCombatTurnByPair };
   let nextLogs = [...match.gameLog];
+  let capturedCapitalOwnerId: string | null = null;
 
   const actorColor = match.players.find((player) => player.id === actingPlayerId)?.color;
 
@@ -180,6 +281,9 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
         nextTiles = nextTiles.map((tile) =>
           tile.key === targetTile.key ? { ...tile, ownerId: actingPlayerId } : tile
         );
+        if (targetTile.isCapital && targetTile.ownerId && targetTile.ownerId !== actingPlayerId) {
+          capturedCapitalOwnerId = targetTile.ownerId;
+        }
 
         const village = nextVillages.find((entry) => entry.tileKey === targetTile.key);
         if (village) {
@@ -204,9 +308,6 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
       return { ok: false, error: "air_cannot_land_on_city" };
     }
 
-    const movingIntoPeaceTerritory =
-      targetTile.ownerId !== null && arePeacePartners(match.peaceTreaties, actingPlayerId, targetTile.ownerId);
-
     nextUnits = nextUnits.map((entry) =>
       entry.id === unit.id
         ? {
@@ -222,6 +323,9 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
       nextTiles = nextTiles.map((tile) =>
         tile.key === targetTile.key ? { ...tile, ownerId: actingPlayerId } : tile
       );
+      if (targetTile.isCapital && targetTile.ownerId && targetTile.ownerId !== actingPlayerId) {
+        capturedCapitalOwnerId = targetTile.ownerId;
+      }
     }
 
     const village = nextVillages.find((entry) => entry.tileKey === targetTile.key);
@@ -247,7 +351,7 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     }
   }
 
-  const next = finalizeMatchState({
+  let next = {
     ...match,
     map: { ...match.map, tiles: nextTiles },
     villages: nextVillages,
@@ -256,7 +360,18 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     fogOfWar: nextExplored,
     lastCombatTurnByPair: nextLastCombatTurnByPair,
     gameLog: nextLogs
-  });
+  };
+
+  if (capturedCapitalOwnerId && !movingIntoPeaceTerritory) {
+    const defeatedColor = match.players.find((player) => player.id === capturedCapitalOwnerId)?.color ?? capturedCapitalOwnerId;
+    next = eliminateFaction(next, capturedCapitalOwnerId, {
+      conquerorPlayerId: actingPlayerId,
+      logText: `${defeatedColor} was eliminated after capital capture`,
+      logColor: actorColor
+    });
+  }
+
+  next = finalizeMatchState(next);
 
   return { ok: true, match: next };
 };
@@ -412,6 +527,21 @@ const applyBreakPeace = (match: MatchState, actingPlayerId: string, toPlayerId: 
   };
 };
 
+const applySurrender = (match: MatchState, actingPlayerId: string): ActionResult => {
+  const surrenderingPlayer = match.players.find((player) => player.id === actingPlayerId);
+  if (!surrenderingPlayer) return { ok: false, error: "player_not_found" };
+  if (!surrenderingPlayer.isAlive) return { ok: false, error: "player_already_eliminated" };
+
+  const next = finalizeMatchState(
+    eliminateFaction(match, actingPlayerId, {
+      logText: `${surrenderingPlayer.color} surrendered`,
+      logColor: surrenderingPlayer.color
+    })
+  );
+
+  return { ok: true, match: next };
+};
+
 const applyEndTurn = (match: MatchState): ActionResult => {
   const alivePlayers = match.players.filter((player) => player.isAlive);
   if (alivePlayers.length === 0) return { ok: false, error: "no_alive_players" };
@@ -508,6 +638,12 @@ export const runAISteps = (input: MatchState): MatchState => {
 };
 
 export const applyGameAction = (match: MatchState, actingPlayerId: string, action: GameAction): ActionResult => {
+  if (action.type === "surrender") {
+    const result = applySurrender(match, actingPlayerId);
+    if (!result.ok) return result;
+    return { ok: true, match: runAISteps(finalizeMatchState(result.match)) };
+  }
+
   const turnCheck = requireTurnAction(match, actingPlayerId);
   if (!turnCheck.ok) return { ok: false, error: turnCheck.error };
 

@@ -190,6 +190,7 @@ export function GamePageClient() {
       respondToReinforcementRequest: (accept) => dispatch({ type: "respond_reinforcement", accept }),
       submitDonation: (entries) => dispatch({ type: "submit_donation", entries }),
       endTurn: () => dispatch({ type: "end_turn" }),
+      resetToMenu: () => dispatch({ type: "surrender" }),
       runAITurn: async () => undefined
     });
 
@@ -207,6 +208,7 @@ export function GamePageClient() {
         respondToReinforcementRequest: original.respondToReinforcementRequest,
         submitDonation: original.submitDonation,
         endTurn: original.endTurn,
+        resetToMenu: original.resetToMenu,
         runAITurn: original.runAITurn
       });
     };
