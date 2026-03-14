@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: worldatwar-socket
+    runtime: node
+    rootDir: server
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        sync: false
+      - key: FRONTEND_URL
+        value: https://worldatwar.online
+      - key: ALLOWED_ORIGINS
+        value: https://worldatwar.online,https://www.worldatwar.online,http://localhost:3000
+      - key: ALLOWED_ORIGIN_REGEX
+        value: ^https://.*\.vercel\.app$

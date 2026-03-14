@@ -38,18 +38,67 @@ import type { MatchActionPayload, MatchCreatePayload, MatchReconnectPayload } fr
 const app = express();
 const httpServer = createServer(app);
 
-const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
 
-const CORS_ORIGINS = [FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"];
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://worldatwar.online",
+  "https://www.worldatwar.online",
+  FRONTEND_URL
+];
+
+const ALLOWED_ORIGINS = Array.from(
+  new Set(
+    (process.env.ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .concat(DEFAULT_ALLOWED_ORIGINS)
+  )
+);
+
+const DEFAULT_ALLOWED_ORIGIN_PATTERNS = ["^https://.*\\.vercel\\.app$"];
+
+const ALLOWED_ORIGIN_REGEX = (
+  (process.env.ALLOWED_ORIGIN_REGEX ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .concat(DEFAULT_ALLOWED_ORIGIN_PATTERNS)
+)
+  .map((pattern) => {
+    try {
+      return new RegExp(pattern);
+    } catch {
+      console.warn(`[WorldAtWar] Invalid ALLOWED_ORIGIN_REGEX entry ignored: ${pattern}`);
+      return null;
+    }
+  })
+  .filter((entry): entry is RegExp => entry !== null);
+
+const isOriginAllowed = (origin?: string) => {
+  if (!origin) return true; // non-browser / same-origin server checks
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return ALLOWED_ORIGIN_REGEX.some((re) => re.test(origin));
+};
+
+const corsOrigin: cors.CorsOptions["origin"] = (origin, callback) => {
+  if (isOriginAllowed(origin)) {
+    callback(null, true);
+    return;
+  }
+  callback(new Error(`CORS origin rejected: ${origin ?? "unknown"}`));
+};
 
 const io = new Server(httpServer, {
-  cors: { origin: CORS_ORIGINS, methods: ["GET", "POST"] },
+  cors: { origin: corsOrigin, methods: ["GET", "POST"], credentials: true },
   pingTimeout: 20000,
   pingInterval: 10000
 });
 
-app.use(cors({ origin: CORS_ORIGINS }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
@@ -265,5 +314,10 @@ io.on("connection", (socket) => {
 
 httpServer.listen(PORT, () => {
   console.log(`[WorldAtWar] Realtime server running on :${PORT}`);
-  console.log(`[WorldAtWar] Accepting connections from: ${CORS_ORIGINS.join(", ")}`);
+  console.log(`[WorldAtWar] Accepting explicit origins: ${ALLOWED_ORIGINS.join(", ")}`);
+  if (ALLOWED_ORIGIN_REGEX.length > 0) {
+    console.log(
+      `[WorldAtWar] Accepting regex origins: ${ALLOWED_ORIGIN_REGEX.map((entry) => entry.source).join(", ")}`
+    );
+  }
 });

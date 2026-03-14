@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "NEXT_DISABLE_WEBPACK_CACHE=1 next dev",
     "dev:server": "cd server && npm run dev",
+    "build:server": "cd server && npm run build",
+    "start:server": "cd server && npm run start",
     "dev:all": "concurrently -n next,socket -c cyan,yellow \"npm run dev\" \"npm run dev:server\"",
     "build": "next build",
     "start": "next start",

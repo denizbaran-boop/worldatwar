@@ -19,8 +19,8 @@ export function getSocket(): Socket {
   }
 
   if (!socket) {
-    const url =
-      process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:3001";
+    const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:3001";
+    const url = rawUrl.replace(/\/+$/, "");
 
     socket = io(url, {
       autoConnect: false,
