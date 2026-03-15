@@ -1,5 +1,5 @@
 import { canProduceUnit, findTileByKey, findUnitOnTile, isTileOccupied, rankPlayersByTiles, unlockTechForPlayer } from "../game/actions";
-import { chooseAIMove, evaluateStrategicMode, evaluateDesiredArmySize, type AIActivityState } from "../game/ai";
+import { chooseAIMove, computeCapitalThreat, evaluateStrategicMode, evaluateDesiredArmySize, type AIActivityState, type AIStrategicMode } from "../game/ai";
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
 import { shouldAcceptPeaceOffer } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
@@ -892,21 +892,100 @@ const maybeHandleReinforcementForAI = (match: MatchState, aiPlayerId: string): M
   };
 };
 
-// ── AI helper: produce one unit (best affordable, most expensive first) ───────
-const maybeProduceForAI = (match: MatchState, aiPlayerId: string): MatchState => {
+// ── AI helper: choose which unit type to produce (composition-aware) ─────────
+const chooseAIUnitTypeToProduce = (
+  player: { gold: number; unlockedTechIds: TechNodeId[] },
+  difficulty: AIDifficulty,
+  ownedUnits: Unit[],
+  capitalThreat: number,
+  strategicMode: AIStrategicMode
+): UnitType | null => {
+  const unlocked = (UNIT_PROGRESSION as UnitType[]).filter((unitType) => {
+    if (unitType === "basic_soldier") return true;
+    return player.unlockedTechIds.some((techId) => TECH_BY_ID[techId]?.unlockedUnitType === unitType);
+  }).filter((unitType) => player.gold >= UNIT_STATS[unitType].productionCost);
+
+  if (unlocked.length === 0) return null;
+
+  const totalArmy = ownedUnits.length;
+  const frontlineTypes: UnitType[] = ["tank", "warrior", "strong_soldier"];
+  const frontlineCount = ownedUnits.filter((u) => frontlineTypes.includes(u.type)).length;
+  const patriotCount = ownedUnits.filter((u) => u.type === "patriot").length;
+  const targetFrontline = Math.max(1, Math.round(totalArmy * 0.55));
+  const targetPatriot = totalArmy > 2 ? Math.round(totalArmy * 0.35) : 0;
+  const tankCost = UNIT_STATS.tank.productionCost;
+
+  if (capitalThreat > 3 && unlocked.includes("patriot") && patriotCount < totalArmy * 0.5) return "patriot";
+  if (player.gold >= tankCost * 2 && unlocked.includes("tank")) return "tank";
+  if (patriotCount < targetPatriot && unlocked.includes("patriot")) return "patriot";
+  if (frontlineCount < targetFrontline) {
+    for (const type of ["tank", "warrior", "strong_soldier"] as UnitType[]) {
+      if (unlocked.includes(type)) return type;
+    }
+  }
+  if ((strategicMode === "Defense" || strategicMode === "Desperation") && unlocked.includes("patriot")) return "patriot";
+  if (difficulty === "easy") return unlocked.sort((a, b) => UNIT_STATS[a].productionCost - UNIT_STATS[b].productionCost)[0]!;
+  return unlocked.sort((a, b) => UNIT_STATS[b].productionCost - UNIT_STATS[a].productionCost)[0]!;
+};
+
+// ── AI helper: choose spawn tile strategically ────────────────────────────────
+const chooseAISpawnTile = (
+  tiles: Tile[],
+  units: Unit[],
+  aiPlayerId: string,
+  discovered: Record<string, boolean>,
+  unitType: UnitType
+): Tile | null => {
+  const enemyUnits = units.filter((u) => u.ownerId !== aiPlayerId && discovered[u.tileKey]);
+  const candidates = tiles.filter(
+    (tile) => tile.ownerId === aiPlayerId && (tile.isCapital || tile.villageId !== null) && !isTileOccupied(units, tile.key)
+  );
+  if (candidates.length === 0) return null;
+
+  const capitalTile = tiles.find((t) => t.ownerId === aiPlayerId && t.isCapital);
+  const isDefensive = unitType === "patriot";
+
+  const scoreTile = (tile: Tile) => {
+    let score = 0;
+    if (isDefensive) {
+      if (tile.isCapital) score += 30;
+      if (capitalTile) score += Math.max(0, 20 - axialDistance(tile, capitalTile) * 5);
+    } else {
+      if (tile.villageId) score += 12;
+      if (tile.hasGoldMine) score += 9;
+      if (tile.isCapital) score += 5;
+      const nearestEnemyDist = enemyUnits.length
+        ? Math.min(...enemyUnits.map((enemy) => {
+            const et = tiles.find((t) => t.key === enemy.tileKey);
+            return et ? axialDistance(tile, et) : Number.POSITIVE_INFINITY;
+          }))
+        : Number.POSITIVE_INFINITY;
+      if (nearestEnemyDist <= 2) score += 20;
+      else if (nearestEnemyDist <= 4) score += 12;
+      else if (nearestEnemyDist <= 6) score += 6;
+    }
+    return score;
+  };
+
+  return candidates.sort((a, b) => scoreTile(b) - scoreTile(a))[0] ?? null;
+};
+
+// ── AI helper: produce one unit with composition-aware type + strategic spawn ─
+const maybeProduceForAI = (match: MatchState, aiPlayerId: string, strategicMode: AIStrategicMode): MatchState => {
   const aiPlayer = match.players.find((entry) => entry.id === aiPlayerId);
   if (!aiPlayer) return match;
 
-  const type = [...UNIT_PROGRESSION]
-    .reverse()
-    .find((entry) => canProduceUnit(aiPlayer, entry) && aiPlayer.gold >= UNIT_STATS[entry].productionCost);
+  const ownedUnits = match.units.filter((u) => u.ownerId === aiPlayerId);
+  const discovered = match.exploredTiles[aiPlayerId] ?? {};
+  const capitalTile = match.map.tiles.find((t) => t.ownerId === aiPlayerId && t.isCapital);
+  const tileMap = new Map(match.map.tiles.map((t) => [t.key, t]));
+  const enemyUnits = match.units.filter((u) => u.ownerId !== aiPlayerId && discovered[u.tileKey]);
+  const capitalThreat = capitalTile ? computeCapitalThreat(capitalTile, enemyUnits, tileMap) : 0;
 
+  const type = chooseAIUnitTypeToProduce(aiPlayer, match.aiDifficulty, ownedUnits, capitalThreat, strategicMode);
   if (!type) return match;
 
-  const spawnTile = match.map.tiles.find(
-    (tile) => tile.ownerId === aiPlayerId && (tile.isCapital || tile.villageId !== null) && !isTileOccupied(match.units, tile.key)
-  );
-
+  const spawnTile = chooseAISpawnTile(match.map.tiles, match.units, aiPlayerId, discovered, type);
   if (!spawnTile) return match;
 
   const produced = applyProduceUnit(match, aiPlayerId, type, spawnTile.key);
@@ -960,7 +1039,7 @@ export const runAISteps = (input: MatchState): MatchState => {
     const maxProductions = Math.max(1, desiredArmy - currentArmy + 1);
     for (let p = 0; p < maxProductions; p += 1) {
       const prev = match;
-      match = maybeProduceForAI(match, aiPlayerId);
+      match = maybeProduceForAI(match, aiPlayerId, strategicMode);
       if (match === prev) break; // no production happened (no gold / no spawn tile)
     }
 
