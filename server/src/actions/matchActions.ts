@@ -1,7 +1,7 @@
 import { canProduceUnit, findTileByKey, findUnitOnTile, isTileOccupied, rankPlayersByTiles, unlockTechForPlayer } from "../game/actions";
 import { chooseAIMove, computeCapitalThreat, evaluateStrategicMode, evaluateDesiredArmySize, shouldBreakPeace, shouldRequestReinforcements, type AIActivityState, type AIStrategicMode } from "../game/ai";
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
-import { getDiplomacyPairKey, shouldAcceptPeaceOffer, shouldSendPeaceOffer } from "../game/diplomacy";
+import { getDiplomacyPairKey, shouldAcceptPeaceOffer, shouldSendPeaceOffer, updatePeaceMemories } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
 import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits } from "../game/fogOfWar";
 import { axialDistance, getNeighborKeys } from "../game/map";
@@ -581,6 +581,14 @@ const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: s
   if (!contacted.includes(toPlayerId)) return { ok: false, error: "faction_not_discovered" };
   if (arePeacePartners(match.peaceTreaties, actingPlayerId, toPlayerId)) return { ok: false, error: "already_at_peace" };
 
+  // Enforce the same cooldowns that the client UI enforces
+  const mem = match.peaceMemories[getDiplomacyPairKey(actingPlayerId, toPlayerId)];
+  if (mem) {
+    if (mem.lastOfferTurn !== null && match.turnNumber - mem.lastOfferTurn < 4) return { ok: false, error: "peace_offer_cooldown" };
+    if (mem.lastRejectedTurn !== null && match.turnNumber - mem.lastRejectedTurn < 6) return { ok: false, error: "peace_offer_cooldown" };
+    if (mem.lastBrokenTurn !== null && match.turnNumber - mem.lastBrokenTurn < 10) return { ok: false, error: "peace_offer_cooldown" };
+  }
+
   const fromColor = match.players.find((entry) => entry.id === actingPlayerId)?.color;
   const toColor = match.players.find((entry) => entry.id === toPlayerId)?.color;
   if (!fromColor || !toColor) return { ok: false, error: "invalid_peace_target" };
@@ -753,6 +761,19 @@ const applyEndTurn = (match: MatchState): ActionResult => {
     }
   }
 
+  // Update peace memories with current tile/unit/village counts every turn
+  // so "recent losses" and "stalled front" evaluations have fresh data
+  const updatedPeaceMemories = updatePeaceMemories(
+    autoRejectPending
+      ? recordPeaceRejection(match.peaceMemories, pending!.fromPlayerId, pending!.toPlayerId, match.turnNumber)
+      : match.peaceMemories,
+    match.players,
+    match.map.tiles,
+    match.units,
+    match.villages,
+    nextTurn
+  );
+
   const next = finalizeMatchState({
     ...match,
     turnNumber: nextTurn,
@@ -760,6 +781,7 @@ const applyEndTurn = (match: MatchState): ActionResult => {
     currentFaction: nextColor ?? match.currentFaction,
     players: playersWithIncome,
     units: refreshedUnits,
+    peaceMemories: updatedPeaceMemories,
     outgoingTreaty: null,
     pendingPeaceTreaty: autoRejectPending ? null : match.pendingPeaceTreaty,
     pendingTreatyResult: null,
@@ -1396,6 +1418,9 @@ export const applyGameAction = (match: MatchState, actingPlayerId: string, actio
       }
       const donor = matchForAction.players.find((p) => p.id === actingPlayerId);
       if (!donor) { result = { ok: false, error: "player_not_found" }; break; }
+      // Validate each donated unit type is actually unlocked by the donor
+      const invalidEntry = action.entries.find((e) => !canProduceUnit(donor, e.unitType));
+      if (invalidEntry) { result = { ok: false, error: "tech_locked" }; break; }
       const totalCost = action.entries.reduce((sum, e) => sum + UNIT_STATS[e.unitType].productionCost * e.quantity, 0);
       if (donor.gold < totalCost) { result = { ok: false, error: "insufficient_gold" }; break; }
       const unitTypeList: UnitType[] = action.entries.flatMap((e) => Array<UnitType>(e.quantity).fill(e.unitType));
