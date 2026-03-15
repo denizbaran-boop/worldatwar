@@ -126,12 +126,13 @@ export function GamePageClient() {
     // Detect peace treaty resolution for multiplayer notifications
     let nextTreatyAccepted: PlayerColor | null = null;
     let nextDiplomaticMsg: string | null = null;
+    let nextReinforcementNotif: string | null = null;
     if (prevMatch && localGamePlayerId) {
-      const prevPending = prevMatch.pendingPeaceTreaty;
-      const currPending = match.pendingPeaceTreaty;
-      // The pending offer was cleared
+      // Peace: check both outgoingTreaty (sender's perspective) and pendingPeaceTreaty (receiver's perspective)
+      const prevPending = prevMatch.pendingPeaceTreaty ?? prevMatch.outgoingTreaty;
+      const currPending = match.pendingPeaceTreaty ?? match.outgoingTreaty;
+      // The pending offer was cleared and we were the sender
       if (prevPending && !currPending && prevPending.fromPlayerId === localGamePlayerId) {
-        // We sent the offer; check if treaty was created
         const wasAccepted = match.peaceTreaties.some(
           (t) =>
             (t.playerA === prevPending.fromPlayerId && t.playerB === prevPending.toPlayerId) ||
@@ -141,6 +142,22 @@ export function GamePageClient() {
           nextTreatyAccepted = prevPending.toColor;
         } else {
           nextDiplomaticMsg = `${prevPending.toColor.charAt(0).toUpperCase() + prevPending.toColor.slice(1)} rejected your peace offer.`;
+        }
+      }
+
+      // Reinforcement: detect when a request sent by us was resolved (cleared = delivery turn)
+      const prevRR = prevMatch.reinforcementRequest;
+      const currRR = match.reinforcementRequest;
+      if (prevRR?.fromPlayerId === localGamePlayerId) {
+        if (prevRR.status === "accepted" && !currRR) {
+          const donorName = prevRR.toColor.charAt(0).toUpperCase() + prevRR.toColor.slice(1);
+          const unitSummary = prevRR.donatedEntries.length > 0
+            ? prevRR.donatedEntries.map((e) => `${e.quantity} ${e.unitType.replace(/_/g, " ")}${e.quantity > 1 ? "s" : ""}`).join(", ")
+            : "reinforcements";
+          nextReinforcementNotif = `Reinforcements from ${donorName} have arrived! (${unitSummary})`;
+        } else if (prevRR.status !== "rejected" && currRR?.status === "rejected") {
+          const donorName = prevRR.toColor.charAt(0).toUpperCase() + prevRR.toColor.slice(1);
+          nextReinforcementNotif = `${donorName} declined your reinforcement request.`;
         }
       }
     }
@@ -183,7 +200,8 @@ export function GamePageClient() {
         playerCount: match.players.length
       },
       ...(nextTreatyAccepted ? { treatyAcceptedNotification: nextTreatyAccepted } : {}),
-      ...(nextDiplomaticMsg ? { diplomaticNotification: nextDiplomaticMsg } : {})
+      ...(nextDiplomaticMsg ? { diplomaticNotification: nextDiplomaticMsg } : {}),
+      ...(nextReinforcementNotif ? { reinforcementNotification: nextReinforcementNotif } : {})
     }));
   }, [localPlayerId, match, multiplayerEnabled]);
 
@@ -458,7 +476,7 @@ export function GamePageClient() {
         </div>
       )}
 
-      {reinforcementRequest?.status === "pending" && reinforcementRequest?.toPlayerId === humanPlayerId && (
+      {reinforcementRequest?.status === "pending" && reinforcementRequest?.toPlayerId === humanPlayerId && currentPlayerId === humanPlayerId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <Card className="w-full max-w-sm p-6 text-center">
             <h2 className="text-xl font-bold text-white">{t.game.reinforcementRequest}</h2>
