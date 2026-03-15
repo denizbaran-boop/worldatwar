@@ -1,13 +1,14 @@
 import { canProduceUnit, findTileByKey, findUnitOnTile, isTileOccupied, rankPlayersByTiles, unlockTechForPlayer } from "../game/actions";
-import { chooseAIMove } from "../game/ai";
+import { chooseAIMove, evaluateStrategicMode, evaluateDesiredArmySize, type AIActivityState } from "../game/ai";
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
 import { shouldAcceptPeaceOffer } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
 import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits } from "../game/fogOfWar";
 import { axialDistance, getNeighborKeys } from "../game/map";
+import { TECH_BY_ID } from "../game/techTree";
 import { UNIT_PROGRESSION, UNIT_STATS } from "../game/unitSystem";
 import { claimVillageTerritory } from "../game/villageSystem";
-import type { FogOfWarState, LogEntry, PeaceTreaty, Player, PlayerColor, ReinforcementRequest, Tile, Unit, UnitType } from "../game/types";
+import type { AIDifficulty, DonationEntry, FogOfWarState, LogEntry, PeaceTreaty, Player, PlayerColor, ReinforcementRequest, Tile, TechNodeId, Unit, UnitType } from "../game/types";
 import { makeId } from "../game/utils";
 import type { GameAction, MatchState } from "../match/matchTypes";
 import { fail, ok, type ValidationResult } from "../validation/matchValidation";
@@ -622,11 +623,24 @@ const applyBreakPeace = (match: MatchState, actingPlayerId: string, toPlayerId: 
     (entry) => !((entry.playerA === actingPlayerId && entry.playerB === toPlayerId) || (entry.playerA === toPlayerId && entry.playerB === actingPlayerId))
   );
 
+  // Evict the breaker's units that are standing on the partner's territory
+  const partnerTileKeys = new Set(match.map.tiles.filter((t) => t.ownerId === toPlayerId).map((t) => t.key));
+  const nextUnits = match.units.filter((u) => !(u.ownerId === actingPlayerId && partnerTileKeys.has(u.tileKey)));
+
+  // Cancel any active reinforcement request between these two players
+  const rr = match.reinforcementRequest;
+  const nextRR = rr &&
+    ((rr.fromPlayerId === actingPlayerId || rr.fromPlayerId === toPlayerId) &&
+     (rr.toPlayerId === actingPlayerId || rr.toPlayerId === toPlayerId))
+    ? null : rr;
+
   return {
     ok: true,
     match: {
       ...match,
       peaceTreaties: nextTreaties,
+      units: nextUnits,
+      reinforcementRequest: nextRR,
       justBrokePeace: [...match.justBrokePeace, toPlayerId],
       gameLog: [...match.gameLog, createLog(match.turnNumber, `${actorColor} broke peace with ${partnerColor}`, actorColor)]
     }
@@ -732,6 +746,153 @@ const applyEndTurn = (match: MatchState): ActionResult => {
   return { ok: true, match: next };
 };
 
+// ── AI helper: pick the best affordable tech node with all prerequisites met ──
+const pickBestAvailableTechForAI = (player: { gold: number; unlockedTechIds: TechNodeId[] }) => {
+  const available = Object.values(TECH_BY_ID).filter((tech) => {
+    if (player.unlockedTechIds.includes(tech.id as TechNodeId)) return false;
+    if (!tech.prerequisites.every((prereq) => player.unlockedTechIds.includes(prereq as TechNodeId))) return false;
+    return player.gold >= tech.cost;
+  });
+  if (available.length === 0) return null;
+  return available.sort((a, b) => b.cost - a.cost)[0]!;
+};
+
+// ── AI helper: try to unlock the best available tech node ────────────────────
+const maybeUnlockTechForAI = (match: MatchState, aiPlayerId: string): MatchState => {
+  const aiPlayer = match.players.find((p) => p.id === aiPlayerId);
+  if (!aiPlayer) return match;
+  const tech = pickBestAvailableTechForAI(aiPlayer);
+  if (!tech) return match;
+  // Keep at least enough gold to produce a basic soldier after unlocking
+  if (aiPlayer.gold - tech.cost < UNIT_STATS.basic_soldier.productionCost) return match;
+  const result = applyUnlockTech(match, aiPlayerId, tech.id);
+  return result.ok ? result.match : match;
+};
+
+// ── AI helper: should this AI donate when asked for reinforcements? ───────────
+const evaluateAIDonationDecision = (
+  aiId: string,
+  requesterId: string,
+  tiles: Tile[],
+  units: Unit[],
+  players: { id: string; gold: number }[],
+  difficulty: AIDifficulty
+): boolean => {
+  const aiPlayer = players.find((p) => p.id === aiId);
+  if (!aiPlayer || aiPlayer.gold < UNIT_STATS.basic_soldier.productionCost) return false;
+
+  const aiCapital = tiles.find((t) => t.isCapital && (t as Tile).ownerId === aiId);
+  const tileMap = new Map(tiles.map((t) => [t.key, t]));
+  const aiEnemyUnits = units.filter((u) => u.ownerId !== aiId && u.ownerId !== requesterId);
+
+  let selfThreat = 0;
+  if (aiCapital) {
+    for (const enemy of aiEnemyUnits) {
+      const et = tileMap.get(enemy.tileKey);
+      if (!et) continue;
+      const dist = axialDistance(aiCapital, et);
+      if (dist <= 3) selfThreat += (4 - dist);
+    }
+  }
+  if (selfThreat >= 5) return false;
+
+  const aiUnitCount = units.filter((u) => u.ownerId === aiId).length;
+  const requesterUnitCount = units.filter((u) => u.ownerId === requesterId).length;
+
+  let score = -10;
+  if (requesterUnitCount <= 2) score += 25;
+  else if (requesterUnitCount <= 4) score += 10;
+  if (aiPlayer.gold >= 100) score += 20;
+  else if (aiPlayer.gold >= 60) score += 10;
+  if (aiUnitCount >= 6) score += 15;
+  if (selfThreat === 0) score += 10;
+  score += difficulty === "easy" ? -15 : difficulty === "normal" ? 0 : 10;
+
+  return score >= 15;
+};
+
+// ── AI helper: pick affordable units to donate ───────────────────────────────
+const MAX_AI_DONATION_UNITS = 5;
+
+const pickAIDonationUnits = (aiPlayer: { gold: number; unlockedTechIds: TechNodeId[] }, difficulty: AIDifficulty): DonationEntry[] => {
+  const budget = Math.floor(aiPlayer.gold * (difficulty === "hard" ? 0.45 : difficulty === "normal" ? 0.35 : 0.25));
+  if (budget < UNIT_STATS.basic_soldier.productionCost) return [];
+
+  const DONATION_PREFERENCE: UnitType[] = ["basic_soldier", "strong_soldier", "warrior", "machine_gunner"];
+  for (const unitType of DONATION_PREFERENCE) {
+    if (unitType !== "basic_soldier") {
+      const unlocked = aiPlayer.unlockedTechIds.some(
+        (techId) => TECH_BY_ID[techId]?.unlockedUnitType === unitType
+      );
+      if (!unlocked) continue;
+    }
+    const cost = UNIT_STATS[unitType].productionCost;
+    if (budget < cost) continue;
+    const maxByBudget = Math.floor(budget / cost);
+    const qty = Math.min(maxByBudget, MAX_AI_DONATION_UNITS, difficulty === "hard" ? 3 : 2);
+    if (qty <= 0) continue;
+    return [{ unitType, quantity: qty }];
+  }
+  return [];
+};
+
+// ── AI helper: handle a pending reinforcement request directed at this AI ─────
+const maybeHandleReinforcementForAI = (match: MatchState, aiPlayerId: string): MatchState => {
+  const rr = match.reinforcementRequest;
+  if (!rr || rr.status !== "pending" || rr.toPlayerId !== aiPlayerId) return match;
+
+  const aiPlayer = match.players.find((p) => p.id === aiPlayerId);
+  if (!aiPlayer) return match;
+
+  const shouldDonate = evaluateAIDonationDecision(
+    aiPlayerId, rr.fromPlayerId, match.map.tiles, match.units, match.players, match.aiDifficulty
+  );
+
+  if (!shouldDonate) {
+    return {
+      ...match,
+      reinforcementRequest: { ...rr, status: "rejected", turnResolved: match.turnNumber },
+      gameLog: [...match.gameLog, createLog(match.turnNumber, `${rr.toColor} declined to send reinforcements`, rr.toColor)]
+    };
+  }
+
+  const donationEntries = pickAIDonationUnits(aiPlayer, match.aiDifficulty);
+  if (donationEntries.length === 0) {
+    return {
+      ...match,
+      reinforcementRequest: { ...rr, status: "rejected", turnResolved: match.turnNumber },
+      gameLog: [...match.gameLog, createLog(match.turnNumber, `${rr.toColor} had nothing to send`, rr.toColor)]
+    };
+  }
+
+  const totalCost = donationEntries.reduce((sum, e) => sum + UNIT_STATS[e.unitType].productionCost * e.quantity, 0);
+  const unitTypeList: UnitType[] = donationEntries.flatMap((e) => Array<UnitType>(e.quantity).fill(e.unitType));
+  const spawnTileKeys = findDonationSpawnTiles(rr.fromPlayerId, match.map.tiles, match.units, unitTypeList.length);
+  const donorColor = aiPlayer.color;
+  const newUnits: Unit[] = spawnTileKeys.map((tileKey, i) => ({
+    id: makeId("unit"),
+    ownerId: rr.fromPlayerId,
+    tileKey,
+    type: unitTypeList[i]!,
+    health: UNIT_STATS[unitTypeList[i]!].maxHealth,
+    hasMovedThisTurn: true,
+    hasAttackedThisTurn: false,
+    movesUsed: 0
+  }));
+  const nextPlayers = match.players.map((p) => p.id === aiPlayerId ? { ...p, gold: p.gold - totalCost } : p);
+  const actualCount = newUnits.length;
+
+  return {
+    ...match,
+    players: nextPlayers,
+    units: [...match.units, ...newUnits],
+    unitDonorColors: { ...match.unitDonorColors, ...Object.fromEntries(newUnits.map((u) => [u.id, donorColor])) },
+    reinforcementRequest: { ...rr, status: "accepted", donatedEntries: donationEntries, totalGoldCost: totalCost, turnResolved: match.turnNumber },
+    gameLog: [...match.gameLog, createLog(match.turnNumber, `${donorColor} sent ${actualCount} unit${actualCount !== 1 ? "s" : ""} to ${rr.fromColor}`, donorColor)]
+  };
+};
+
+// ── AI helper: produce one unit (best affordable, most expensive first) ───────
 const maybeProduceForAI = (match: MatchState, aiPlayerId: string): MatchState => {
   const aiPlayer = match.players.find((entry) => entry.id === aiPlayerId);
   if (!aiPlayer) return match;
@@ -752,35 +913,77 @@ const maybeProduceForAI = (match: MatchState, aiPlayerId: string): MatchState =>
   return produced.ok ? produced.match : match;
 };
 
+// ── Default activity state used when per-player tracking isn't available ─────
+const DEFAULT_AI_ACTIVITY: AIActivityState = {
+  turnsWithoutProduction: 0,
+  turnsWithoutExploration: 0,
+  turnsBoxedIn: 0,
+  turnsBelowTargetArmy: 0,
+  lastStrategicMode: null
+};
+
 export const runAISteps = (input: MatchState): MatchState => {
   let match = input;
   let safety = 0;
 
   while (!match.gameOver && match.aiPlayerIds.includes(match.currentPlayerId) && safety < 60) {
     const aiPlayerId = match.currentPlayerId;
-    match = maybeProduceForAI(match, aiPlayerId);
 
-    for (let i = 0; i < 3; i += 1) {
+    // ── 1. Compute strategic mode for this turn ──────────────────────────────
+    const aiSnapshot = {
+      playerId: aiPlayerId,
+      players: match.players,
+      tiles: match.map.tiles,
+      units: match.units,
+      villages: match.villages,
+      discovered: match.exploredTiles[aiPlayerId] ?? {},
+      difficulty: match.aiDifficulty,
+      mapSize: match.map.mapSize,
+      peaceTreaties: match.peaceTreaties
+    };
+    const strategicMode = evaluateStrategicMode(aiSnapshot, DEFAULT_AI_ACTIVITY);
+    const desiredArmy = evaluateDesiredArmySize(aiSnapshot, strategicMode, DEFAULT_AI_ACTIVITY);
+    const currentArmy = match.units.filter((u) => u.ownerId === aiPlayerId).length;
+
+    // ── 2. Respond to reinforcement request if AI is the donor ───────────────
+    match = maybeHandleReinforcementForAI(match, aiPlayerId);
+    if (match.gameOver) break;
+
+    // ── 3. Unlock tech (up to 2 nodes per turn) ──────────────────────────────
+    for (let t = 0; t < 2; t += 1) {
+      const prev = match;
+      match = maybeUnlockTechForAI(match, aiPlayerId);
+      if (match === prev) break;
+    }
+
+    // ── 4. Produce units until army target is reached or gold runs out ───────
+    const maxProductions = Math.max(1, desiredArmy - currentArmy + 1);
+    for (let p = 0; p < maxProductions; p += 1) {
+      const prev = match;
+      match = maybeProduceForAI(match, aiPlayerId);
+      if (match === prev) break; // no production happened (no gold / no spawn tile)
+    }
+
+    // ── 5. Move / attack with all available units ────────────────────────────
+    const unitCap = Math.max(12, match.units.filter((u) => u.ownerId === aiPlayerId).length * 2);
+    let moveCount = 0;
+    while (moveCount < unitCap) {
       const choice = chooseAIMove({
-        playerId: aiPlayerId,
-        players: match.players,
+        ...aiSnapshot,
         tiles: match.map.tiles,
         units: match.units,
-        villages: match.villages,
         discovered: match.exploredTiles[aiPlayerId] ?? {},
-        difficulty: match.aiDifficulty,
-        mapSize: match.map.mapSize,
-        peaceTreaties: match.peaceTreaties
+        strategicMode
       });
-
       if (!choice) break;
       const result = applyUnitAction(match, aiPlayerId, choice.unitId, choice.targetTileKey);
+      moveCount += 1;
       if (!result.ok) break;
       match = result.match;
       if (match.gameOver) break;
     }
 
-    // Handle incoming peace offer to this AI
+    // ── 6. Handle incoming peace offer ───────────────────────────────────────
     const pendingOffer = match.pendingPeaceTreaty;
     if (pendingOffer && pendingOffer.toPlayerId === aiPlayerId) {
       const resolution = shouldAcceptPeaceOffer({
@@ -795,9 +998,7 @@ export const runAISteps = (input: MatchState): MatchState => {
         turnNumber: match.turnNumber
       });
       const responded = applyRespondPeace(match, aiPlayerId, resolution.accepted);
-      if (responded.ok) {
-        match = responded.match;
-      }
+      if (responded.ok) match = responded.match;
     }
 
     const ended = applyEndTurn(match);
