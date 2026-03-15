@@ -160,7 +160,7 @@ export function HowToPlay() {
   }, []);
 
   return (
-    <section ref={sectionRef} className="relative w-full overflow-hidden px-4 py-24">
+    <section id="how-to-play" ref={sectionRef} className="relative w-full overflow-hidden px-4 py-24">
       {/* Tactical grid background */}
       <div
         className="pointer-events-none absolute inset-0"

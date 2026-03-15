@@ -7,6 +7,7 @@ import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   onPlay: () => void;
+  onLearnMore?: () => void;
 };
 
 const EXPLOSION_COLORS = ["#3b82f6", "#ef4444", "#a855f7", "#22c55e", "#eab308"];
@@ -21,7 +22,7 @@ type Explosion = {
 
 let _nextId = 0;
 
-export function LandingHero({ onPlay }: Props) {
+export function LandingHero({ onPlay, onLearnMore }: Props) {
   const { t } = useTranslation();
   const [explosions, setExplosions] = useState<Explosion[]>([]);
 
@@ -92,8 +93,13 @@ export function LandingHero({ onPlay }: Props) {
           <p className="mx-auto mt-5 max-w-xl text-base text-slate-300 md:text-lg">
             {t.landing.subtitle}
           </p>
-          <div className="mt-10 flex justify-center">
-            <Button onClick={onPlay} className="px-12 py-3 text-lg">{t.landing.play}</Button>
+          <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+            <Button onClick={onPlay} className="w-full px-12 py-3 text-lg sm:w-auto">{t.landing.play}</Button>
+            {onLearnMore && (
+              <Button variant="secondary" onClick={onLearnMore} className="w-full px-8 py-3 text-base sm:w-auto">
+                How to Play
+              </Button>
+            )}
           </div>
         </div>
       </Card>
