@@ -1,14 +1,14 @@
 import { canProduceUnit, findTileByKey, findUnitOnTile, isTileOccupied, rankPlayersByTiles, unlockTechForPlayer } from "../game/actions";
-import { chooseAIMove, computeCapitalThreat, evaluateStrategicMode, evaluateDesiredArmySize, type AIActivityState, type AIStrategicMode } from "../game/ai";
+import { chooseAIMove, computeCapitalThreat, evaluateStrategicMode, evaluateDesiredArmySize, shouldBreakPeace, shouldRequestReinforcements, type AIActivityState, type AIStrategicMode } from "../game/ai";
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
-import { shouldAcceptPeaceOffer } from "../game/diplomacy";
+import { getDiplomacyPairKey, shouldAcceptPeaceOffer, shouldSendPeaceOffer } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
 import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits } from "../game/fogOfWar";
 import { axialDistance, getNeighborKeys } from "../game/map";
 import { TECH_BY_ID } from "../game/techTree";
 import { UNIT_PROGRESSION, UNIT_STATS } from "../game/unitSystem";
 import { claimVillageTerritory } from "../game/villageSystem";
-import type { AIDifficulty, DonationEntry, FogOfWarState, LogEntry, PeaceTreaty, Player, PlayerColor, ReinforcementRequest, Tile, TechNodeId, Unit, UnitType } from "../game/types";
+import type { AIDifficulty, DonationEntry, FogOfWarState, LogEntry, PeacePairMemory, PeaceTreaty, Player, PlayerColor, ReinforcementRequest, Tile, TechNodeId, Unit, UnitType } from "../game/types";
 import { makeId } from "../game/utils";
 import type { GameAction, MatchState } from "../match/matchTypes";
 import { fail, ok, type ValidationResult } from "../validation/matchValidation";
@@ -28,6 +28,27 @@ const getFactionPairKey = (a: string, b: string) => [a, b].sort().join(":");
 
 const arePeacePartners = (treaties: PeaceTreaty[], a: string, b: string) =>
   treaties.some((t) => (t.playerA === a && t.playerB === b) || (t.playerA === b && t.playerB === a));
+
+const recordPeaceOffer = (memories: Record<string, PeacePairMemory>, from: string, to: string, turn: number) => {
+  const key = getDiplomacyPairKey(from, to);
+  const mem = memories[key];
+  if (!mem) return memories;
+  return { ...memories, [key]: { ...mem, lastOfferTurn: turn } };
+};
+
+const recordPeaceRejection = (memories: Record<string, PeacePairMemory>, from: string, to: string, turn: number) => {
+  const key = getDiplomacyPairKey(from, to);
+  const mem = memories[key];
+  if (!mem) return memories;
+  return { ...memories, [key]: { ...mem, lastRejectedTurn: turn } };
+};
+
+const recordBrokenPeace = (memories: Record<string, PeacePairMemory>, breaker: string, other: string, turn: number) => {
+  const key = getDiplomacyPairKey(breaker, other);
+  const mem = memories[key];
+  if (!mem) return memories;
+  return { ...memories, [key]: { ...mem, lastBrokenTurn: turn, trustPenalty: (mem.trustPenalty ?? 0) + 15 } };
+};
 
 const resetMovementForPlayer = (units: Unit[], playerId: string) =>
   units.map((unit) =>
@@ -88,6 +109,10 @@ const eliminateFaction = (
     (treaty) => treaty.playerA !== defeatedPlayerId && treaty.playerB !== defeatedPlayerId
   );
 
+  const rr = match.reinforcementRequest;
+  const nextReinforcementRequest = rr &&
+    (rr.fromPlayerId === defeatedPlayerId || rr.toPlayerId === defeatedPlayerId) ? null : rr;
+
   if (transferTo === null) {
     const neutralVillageIds = new Set(
       nextVillages.filter((village) => village.ownerId === null).map((village) => village.id)
@@ -113,6 +138,7 @@ const eliminateFaction = (
     units: nextUnits,
     players: nextPlayers,
     peaceTreaties: nextPeaceTreaties,
+    reinforcementRequest: nextReinforcementRequest,
     justBrokePeace: match.justBrokePeace.filter((entry) => entry !== defeatedPlayerId),
     currentPlayerId: nextCurrentPlayerId,
     currentFaction: nextCurrentFaction,
@@ -573,6 +599,7 @@ const applySendPeace = (match: MatchState, actingPlayerId: string, toPlayerId: s
         turnSent: match.turnNumber,
         direction: "human_outgoing"
       },
+      peaceMemories: recordPeaceOffer(match.peaceMemories, actingPlayerId, toPlayerId, match.turnNumber),
       gameLog: [...match.gameLog, createLog(match.turnNumber, `${fromColor} proposed peace to ${toColor}`, fromColor)],
       diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, `${fromColor} proposed peace to ${toColor}`, fromColor)]
     }
@@ -597,11 +624,16 @@ const applyRespondPeace = (match: MatchState, actingPlayerId: string, accept: bo
     ? `${toColor} accepted peace with ${fromColor}`
     : `${toColor} rejected peace from ${fromColor}`;
 
+  const nextMemories = accept
+    ? match.peaceMemories
+    : recordPeaceRejection(match.peaceMemories, offer.fromPlayerId, offer.toPlayerId, match.turnNumber);
+
   return {
     ok: true,
     match: {
       ...match,
       peaceTreaties: nextPeaceTreaties,
+      peaceMemories: nextMemories,
       outgoingTreaty: null,
       pendingPeaceTreaty: null,
       pendingTreatyResult: null,
@@ -639,6 +671,7 @@ const applyBreakPeace = (match: MatchState, actingPlayerId: string, toPlayerId: 
     match: {
       ...match,
       peaceTreaties: nextTreaties,
+      peaceMemories: recordBrokenPeace(match.peaceMemories, actingPlayerId, toPlayerId, match.turnNumber),
       units: nextUnits,
       reinforcementRequest: nextRR,
       justBrokePeace: [...match.justBrokePeace, toPlayerId],
@@ -1001,6 +1034,8 @@ const DEFAULT_AI_ACTIVITY: AIActivityState = {
   lastStrategicMode: null
 };
 
+const REINFORCEMENT_COOLDOWN_TURNS = 4;
+
 export const runAISteps = (input: MatchState): MatchState => {
   let match = input;
   let safety = 0;
@@ -1028,22 +1063,171 @@ export const runAISteps = (input: MatchState): MatchState => {
     match = maybeHandleReinforcementForAI(match, aiPlayerId);
     if (match.gameOver) break;
 
-    // ── 3. Unlock tech (up to 2 nodes per turn) ──────────────────────────────
+    // ── 3. Request reinforcements if desperate and ally available ────────────
+    if (!match.reinforcementRequest) {
+      const reqEval = shouldRequestReinforcements(aiSnapshot, DEFAULT_AI_ACTIVITY);
+      if (reqEval.shouldRequest) {
+        const aiPlayer = match.players.find((p) => p.id === aiPlayerId);
+        const allies = match.peaceTreaties
+          .filter((t) => t.playerA === aiPlayerId || t.playerB === aiPlayerId)
+          .map((t) => (t.playerA === aiPlayerId ? t.playerB : t.playerA))
+          .filter((allyId) => match.factionContactPairs.includes(getFactionPairKey(aiPlayerId, allyId)))
+          .map((allyId) => match.players.find((p) => p.id === allyId))
+          .filter((p): p is NonNullable<typeof p> => Boolean(p))
+          .sort((a, b) =>
+            match.units.filter((u) => u.ownerId === b.id).length -
+            match.units.filter((u) => u.ownerId === a.id).length
+          );
+        for (const ally of allies) {
+          const cooldownKey = getFactionPairKey(aiPlayerId, ally.id);
+          const lastRequest = match.reinforcementCooldowns[cooldownKey] ?? 0;
+          if (match.turnNumber - lastRequest < REINFORCEMENT_COOLDOWN_TURNS) continue;
+          match = {
+            ...match,
+            reinforcementRequest: {
+              id: makeId("rr"),
+              fromPlayerId: aiPlayerId,
+              fromColor: aiPlayer?.color ?? "blue",
+              toPlayerId: ally.id,
+              toColor: ally.color,
+              turnSent: match.turnNumber,
+              status: "pending",
+              donatedEntries: [],
+              totalGoldCost: 0,
+              turnResolved: null
+            },
+            reinforcementCooldowns: { ...match.reinforcementCooldowns, [cooldownKey]: match.turnNumber },
+            diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, `${aiPlayer?.color ?? "blue"} requested reinforcements from ${ally.color}`, aiPlayer?.color)]
+          };
+          break;
+        }
+      }
+    }
+
+    // ── 4. Strategic betrayal: break peace when boxed-in or opportunistic ────
+    if (strategicMode === "Preparation" || strategicMode === "War") {
+      for (const treaty of match.peaceTreaties) {
+        const targetId = treaty.playerA === aiPlayerId ? treaty.playerB : treaty.playerA;
+        if (treaty.playerA !== aiPlayerId && treaty.playerB !== aiPlayerId) continue;
+        const trustPenalty = match.peaceMemories[getDiplomacyPairKey(aiPlayerId, targetId)]?.trustPenalty ?? 0;
+        const breakEval = shouldBreakPeace(
+          { ...aiSnapshot, tiles: match.map.tiles, units: match.units },
+          targetId,
+          DEFAULT_AI_ACTIVITY,
+          trustPenalty
+        );
+        if (breakEval.shouldBreak) {
+          const broken = applyBreakPeace(match, aiPlayerId, targetId);
+          if (broken.ok) match = broken.match;
+          break; // one betrayal per turn
+        }
+      }
+    }
+
+    // ── 5. Proactive peace proposal to known enemies ─────────────────────────
+    if (!match.pendingPeaceTreaty) {
+      const knownEnemies = match.players.filter((p) =>
+        p.isAlive &&
+        p.id !== aiPlayerId &&
+        !arePeacePartners(match.peaceTreaties, aiPlayerId, p.id) &&
+        match.factionContactPairs.includes(getFactionPairKey(aiPlayerId, p.id))
+      );
+      for (const enemy of knownEnemies) {
+        const pairKey = getDiplomacyPairKey(aiPlayerId, enemy.id);
+        const mem = match.peaceMemories[pairKey];
+        // Respect cooldowns before proposing
+        if (mem) {
+          if (mem.lastOfferTurn !== null && match.turnNumber - mem.lastOfferTurn < 4) continue;
+          if (mem.lastRejectedTurn !== null && match.turnNumber - mem.lastRejectedTurn < 6) continue;
+          if (mem.lastBrokenTurn !== null && match.turnNumber - mem.lastBrokenTurn < 10) continue;
+        }
+        const peaceEval = shouldSendPeaceOffer({
+          selfId: aiPlayerId,
+          targetId: enemy.id,
+          players: match.players,
+          tiles: match.map.tiles,
+          units: match.units,
+          villages: match.villages,
+          peaceTreaties: match.peaceTreaties,
+          memories: match.peaceMemories,
+          turnNumber: match.turnNumber
+        });
+        if (!peaceEval.shouldSend) continue;
+
+        const fromColor = match.players.find((p) => p.id === aiPlayerId)?.color;
+        const toColor = enemy.color;
+        if (!fromColor) continue;
+
+        // If target is also AI, resolve immediately; otherwise leave pending for human
+        if (match.aiPlayerIds.includes(enemy.id)) {
+          const resolution = shouldAcceptPeaceOffer({
+            selfId: enemy.id,
+            targetId: aiPlayerId,
+            players: match.players,
+            tiles: match.map.tiles,
+            units: match.units,
+            villages: match.villages,
+            peaceTreaties: match.peaceTreaties,
+            memories: match.peaceMemories,
+            turnNumber: match.turnNumber
+          });
+          const updatedMemories = resolution.accepted
+            ? recordPeaceOffer(match.peaceMemories, aiPlayerId, enemy.id, match.turnNumber)
+            : recordPeaceRejection(
+                recordPeaceOffer(match.peaceMemories, aiPlayerId, enemy.id, match.turnNumber),
+                aiPlayerId, enemy.id, match.turnNumber
+              );
+          const outcomeText = resolution.accepted
+            ? `${fromColor} and ${toColor} agreed to a peace treaty`
+            : `${toColor} refused ${fromColor}'s peace offer`;
+          match = {
+            ...match,
+            peaceTreaties: resolution.accepted
+              ? [...match.peaceTreaties, { playerA: aiPlayerId, playerB: enemy.id }]
+              : match.peaceTreaties,
+            peaceMemories: updatedMemories,
+            gameLog: [...match.gameLog, createLog(match.turnNumber, outcomeText, resolution.accepted ? fromColor : toColor)],
+            diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, outcomeText, resolution.accepted ? fromColor : toColor)]
+          };
+        } else {
+          // Target is a human — set pending treaty for them to respond
+          match = {
+            ...match,
+            pendingPeaceTreaty: {
+              fromPlayerId: aiPlayerId,
+              toPlayerId: enemy.id,
+              fromColor,
+              toColor,
+              reason: peaceEval.evaluation.primaryReason,
+              score: peaceEval.evaluation.score,
+              turnSent: match.turnNumber,
+              direction: "ai_outgoing"
+            },
+            peaceMemories: recordPeaceOffer(match.peaceMemories, aiPlayerId, enemy.id, match.turnNumber),
+            gameLog: [...match.gameLog, createLog(match.turnNumber, `${fromColor} proposes peace to ${toColor}`, fromColor)],
+            diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, `${fromColor} proposes peace to ${toColor}`, fromColor)]
+          };
+        }
+        break; // one proposal per turn
+      }
+    }
+
+    // ── 6. Unlock tech (up to 2 nodes per turn) ──────────────────────────────
     for (let t = 0; t < 2; t += 1) {
       const prev = match;
       match = maybeUnlockTechForAI(match, aiPlayerId);
       if (match === prev) break;
     }
 
-    // ── 4. Produce units until army target is reached or gold runs out ───────
+    // ── 7. Produce units until army target is reached or gold runs out ───────
     const maxProductions = Math.max(1, desiredArmy - currentArmy + 1);
     for (let p = 0; p < maxProductions; p += 1) {
       const prev = match;
       match = maybeProduceForAI(match, aiPlayerId, strategicMode);
-      if (match === prev) break; // no production happened (no gold / no spawn tile)
+      if (match === prev) break;
     }
 
-    // ── 5. Move / attack with all available units ────────────────────────────
+    // ── 8. Move / attack with all available units ────────────────────────────
     const unitCap = Math.max(12, match.units.filter((u) => u.ownerId === aiPlayerId).length * 2);
     let moveCount = 0;
     while (moveCount < unitCap) {
@@ -1062,7 +1246,16 @@ export const runAISteps = (input: MatchState): MatchState => {
       if (match.gameOver) break;
     }
 
-    // ── 6. Handle incoming peace offer ───────────────────────────────────────
+    // ── 9. Heal unacted wounded units ────────────────────────────────────────
+    for (const unit of match.units) {
+      if (unit.ownerId !== aiPlayerId) continue;
+      if (unit.hasMovedThisTurn) continue;
+      if (unit.health >= UNIT_STATS[unit.type].maxHealth) continue;
+      const healed = applyHealUnit(match, aiPlayerId, unit.id);
+      if (healed.ok) match = healed.match;
+    }
+
+    // ── 10. Handle incoming peace offer ─────────────────────────────────────
     const pendingOffer = match.pendingPeaceTreaty;
     if (pendingOffer && pendingOffer.toPlayerId === aiPlayerId) {
       const resolution = shouldAcceptPeaceOffer({
