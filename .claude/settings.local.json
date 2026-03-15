@@ -42,7 +42,26 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git config:*)",
-      "Bash(security find-internet-password:*)"
+      "Bash(security find-internet-password:*)",
+      "Bash(npm run:*)",
+      "Bash(npx next:*)",
+      "Bash(npx eslint:*)",
+      "Bash(git -C /Users/deniz/Documents/WorldAtWar status)",
+      "Bash(git -C /Users/deniz/Documents/WorldAtWar diff --stat)",
+      "Bash(git -C /Users/deniz/Documents/WorldAtWar add src/lib/i18n/ src/app/layout.tsx src/components/game/ActionPanel.tsx src/components/game/CityProductionPanel.tsx src/components/game/GameLog.tsx src/components/game/GamePageClient.tsx src/components/game/PlayerSidebar.tsx src/components/game/ReinforcementDonationModal.tsx src/components/game/TechTreeModal.tsx src/components/game/TechTreePanel.tsx src/components/game/TurnBanner.tsx src/components/game/WorldMap.tsx src/components/menu/LandingHero.tsx src/components/menu/PlayOptionsCard.tsx src/components/menu/SetupPanel.tsx tsconfig.json next-env.d.ts)",
+      "Bash(git -C:*)",
+      "Bash(grep \"\\\\.ts$\")",
+      "Bash(grep \"\\\\.tsx$\")",
+      "Bash(wc -l /Users/deniz/Documents/WorldAtWar/src/lib/game/*.ts /Users/deniz/Documents/WorldAtWar/src/store/*.ts /Users/deniz/Documents/WorldAtWar/src/components/game/*.tsx)",
+      "Bash(npm install:*)",
+      "Bash(find /Users/deniz/Documents/WorldAtWar/server/src -type f -name *.ts -o -name *.js)",
+      "Read(//Users/deniz/Desktop/Developer/**)",
+      "Bash(find public:*)",
+      "Bash(cp /Users/deniz/Desktop/Developer/waw_icon.png /Users/deniz/Documents/WorldAtWar/src/app/icon.png)",
+      "Bash(cp /Users/deniz/Desktop/Developer/waw_icon.png /Users/deniz/Documents/WorldAtWar/src/app/apple-icon.png)",
+      "Bash(convert --version)",
+      "Bash(find /Users/deniz/Documents/WorldAtWar/server -name *.ts)",
+      "Bash(git reset:*)"
     ]
   }
 }
