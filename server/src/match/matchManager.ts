@@ -189,7 +189,7 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
 
   const filteredUnits = match.units.filter((unit) => {
     if (unit.ownerId === gamePlayerId) return true;
-    return Boolean(visibleForPlayer[unit.tileKey]);
+    return Boolean(exploredForPlayer[unit.tileKey]);
   });
 
   const filteredVillages = filterVillagesForPerspective(match.villages, exploredForPlayer);
