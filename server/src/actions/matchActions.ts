@@ -7,7 +7,7 @@ import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits }
 import { axialDistance, getNeighborKeys } from "../game/map";
 import { UNIT_PROGRESSION, UNIT_STATS } from "../game/unitSystem";
 import { claimVillageTerritory } from "../game/villageSystem";
-import type { FogOfWarState, LogEntry, PeaceTreaty, Player, PlayerColor, Tile, Unit, UnitType } from "../game/types";
+import type { FogOfWarState, LogEntry, PeaceTreaty, Player, PlayerColor, ReinforcementRequest, Tile, Unit, UnitType } from "../game/types";
 import { makeId } from "../game/utils";
 import type { GameAction, MatchState } from "../match/matchTypes";
 import { fail, ok, type ValidationResult } from "../validation/matchValidation";
@@ -633,6 +633,19 @@ const applyBreakPeace = (match: MatchState, actingPlayerId: string, toPlayerId: 
   };
 };
 
+const findDonationSpawnTiles = (receiverId: string, tiles: Tile[], units: Unit[], count: number): string[] => {
+  const capitalTile = tiles.find((t) => t.isCapital && t.ownerId === receiverId);
+  const occupied = new Set(units.map((u) => u.tileKey));
+  return tiles
+    .filter((t) => t.ownerId === receiverId && !occupied.has(t.key))
+    .sort((a, b) => {
+      if (!capitalTile) return 0;
+      return axialDistance(a, capitalTile) - axialDistance(b, capitalTile);
+    })
+    .slice(0, count)
+    .map((t) => t.key);
+};
+
 const applySurrender = (match: MatchState, actingPlayerId: string): ActionResult => {
   const surrenderingPlayer = match.players.find((player) => player.id === actingPlayerId);
   if (!surrenderingPlayer) return { ok: false, error: "player_not_found" };
@@ -678,6 +691,21 @@ const applyEndTurn = (match: MatchState): ActionResult => {
     ? `${pending?.toColor ?? match.currentFaction} rejected peace from ${pending?.fromColor ?? "unknown"}`
     : null;
 
+  // Reinforcement: auto-reject if donor ends turn mid-donation; clear on requester's next turn
+  const rr = match.reinforcementRequest;
+  let nextReinforcementRequest = match.reinforcementRequest;
+  const extraLogs: LogEntry[] = [];
+  if (rr) {
+    if (rr.status === "donating" && rr.toPlayerId === match.currentPlayerId) {
+      // Donor ended turn without submitting → auto-reject
+      nextReinforcementRequest = { ...rr, status: "rejected", turnResolved: match.turnNumber };
+      extraLogs.push(createLog(match.turnNumber, `${rr.toColor} did not send reinforcements (timed out)`, rr.toColor));
+    } else if ((rr.status === "accepted" || rr.status === "rejected") && rr.fromPlayerId === nextPlayerId) {
+      // Requester's turn is next → clear the request so client can detect and show notification
+      nextReinforcementRequest = null;
+    }
+  }
+
   const next = finalizeMatchState({
     ...match,
     turnNumber: nextTurn,
@@ -689,8 +717,10 @@ const applyEndTurn = (match: MatchState): ActionResult => {
     pendingPeaceTreaty: autoRejectPending ? null : match.pendingPeaceTreaty,
     pendingTreatyResult: null,
     justBrokePeace: [],
+    reinforcementRequest: nextReinforcementRequest,
     gameLog: [
       ...match.gameLog,
+      ...extraLogs,
       ...(autoRejectText ? [createLog(match.turnNumber, autoRejectText, pending?.toColor)] : []),
       createLog(nextTurn, `${nextColor ?? nextPlayerId} ended turn`, nextColor)
     ],
@@ -815,40 +845,118 @@ export const applyGameAction = (match: MatchState, actingPlayerId: string, actio
     case "send_peace":
       result = applySendPeace(matchForAction, actingPlayerId, action.toPlayerId);
       break;
-    case "send_reinforcement":
-      if (!(matchForAction.contactedPlayerIdsByPlayer[actingPlayerId] ?? []).includes(action.toPlayerId)) {
+    case "send_reinforcement": {
+      const contacted = matchForAction.contactedPlayerIdsByPlayer[actingPlayerId] ?? [];
+      if (!contacted.includes(action.toPlayerId)) {
         result = { ok: false, error: "faction_not_discovered" };
+        break;
+      }
+      if (!arePeacePartners(matchForAction.peaceTreaties, actingPlayerId, action.toPlayerId)) {
+        result = { ok: false, error: "not_peace_partners" };
+        break;
+      }
+      if (matchForAction.reinforcementRequest) {
+        result = { ok: false, error: "reinforcement_request_pending" };
+        break;
+      }
+      const fromColor = matchForAction.players.find((p) => p.id === actingPlayerId)?.color;
+      const toColor = matchForAction.players.find((p) => p.id === action.toPlayerId)?.color;
+      if (!fromColor || !toColor) { result = { ok: false, error: "invalid_target" }; break; }
+      const newRR: ReinforcementRequest = {
+        id: makeId("reinf"),
+        fromPlayerId: actingPlayerId,
+        fromColor,
+        toPlayerId: action.toPlayerId,
+        toColor,
+        turnSent: matchForAction.turnNumber,
+        status: "pending",
+        donatedEntries: [],
+        totalGoldCost: 0,
+        turnResolved: null
+      };
+      result = {
+        ok: true,
+        match: {
+          ...matchForAction,
+          reinforcementRequest: newRR,
+          gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, `${fromColor} requested reinforcements from ${toColor}`, fromColor)],
+          diplomacyLog: [...matchForAction.diplomacyLog, createLog(matchForAction.turnNumber, `${fromColor} requested reinforcements from ${toColor}`, fromColor)]
+        }
+      };
+      break;
+    }
+    case "respond_reinforcement": {
+      const rr = matchForAction.reinforcementRequest;
+      if (!rr || rr.toPlayerId !== actingPlayerId || rr.status !== "pending") {
+        result = { ok: false, error: "no_pending_reinforcement_request" };
+        break;
+      }
+      const actorColor = matchForAction.players.find((p) => p.id === actingPlayerId)?.color;
+      if (action.accept) {
+        result = {
+          ok: true,
+          match: {
+            ...matchForAction,
+            reinforcementRequest: { ...rr, status: "donating" },
+            gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, `${actorColor} agreed to send reinforcements`, actorColor)],
+            diplomacyLog: [...matchForAction.diplomacyLog, createLog(matchForAction.turnNumber, `${actorColor} agreed to send reinforcements`, actorColor)]
+          }
+        };
       } else {
         result = {
           ok: true,
           match: {
             ...matchForAction,
-            gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, "Reinforcement request sent")]
+            reinforcementRequest: { ...rr, status: "rejected", turnResolved: matchForAction.turnNumber },
+            gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, `${actorColor} declined reinforcement request`, actorColor)],
+            diplomacyLog: [...matchForAction.diplomacyLog, createLog(matchForAction.turnNumber, `${actorColor} declined reinforcement request`, actorColor)]
           }
         };
       }
       break;
-    case "respond_reinforcement":
+    }
+    case "submit_donation": {
+      const rr = matchForAction.reinforcementRequest;
+      if (!rr || rr.toPlayerId !== actingPlayerId || rr.status !== "donating") {
+        result = { ok: false, error: "no_active_donation" };
+        break;
+      }
+      const donor = matchForAction.players.find((p) => p.id === actingPlayerId);
+      if (!donor) { result = { ok: false, error: "player_not_found" }; break; }
+      const totalCost = action.entries.reduce((sum, e) => sum + UNIT_STATS[e.unitType].productionCost * e.quantity, 0);
+      if (donor.gold < totalCost) { result = { ok: false, error: "insufficient_gold" }; break; }
+      const unitTypeList: UnitType[] = action.entries.flatMap((e) => Array<UnitType>(e.quantity).fill(e.unitType));
+      const spawnTileKeys = findDonationSpawnTiles(rr.fromPlayerId, matchForAction.map.tiles, matchForAction.units, unitTypeList.length);
+      const newUnits: Unit[] = spawnTileKeys.map((tileKey, i) => ({
+        id: makeId("unit"),
+        ownerId: rr.fromPlayerId,
+        tileKey,
+        type: unitTypeList[i]!,
+        health: UNIT_STATS[unitTypeList[i]!].maxHealth,
+        hasMovedThisTurn: true,
+        hasAttackedThisTurn: false,
+        movesUsed: 0
+      }));
+      const actualCount = newUnits.length;
+      const donorColor = donor.color;
+      const receiverColor = rr.fromColor;
+      const nextPlayers = matchForAction.players.map((p) => p.id === actingPlayerId ? { ...p, gold: p.gold - totalCost } : p);
+      const nextUnits = [...matchForAction.units, ...newUnits];
+      const nextUnitDonorColors = { ...matchForAction.unitDonorColors, ...Object.fromEntries(newUnits.map((u) => [u.id, donorColor])) };
       result = {
         ok: true,
         match: {
           ...matchForAction,
-          gameLog: [
-            ...matchForAction.gameLog,
-            createLog(matchForAction.turnNumber, action.accept ? "Reinforcement accepted" : "Reinforcement rejected")
-          ]
+          players: nextPlayers,
+          units: nextUnits,
+          unitDonorColors: nextUnitDonorColors,
+          reinforcementRequest: { ...rr, status: "accepted", donatedEntries: action.entries, totalGoldCost: totalCost, turnResolved: matchForAction.turnNumber },
+          gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, `${donorColor} sent ${actualCount} unit${actualCount !== 1 ? "s" : ""} to ${receiverColor}`, donorColor)],
+          diplomacyLog: [...matchForAction.diplomacyLog, createLog(matchForAction.turnNumber, `${donorColor} sent ${actualCount} unit${actualCount !== 1 ? "s" : ""} to ${receiverColor}`, donorColor)]
         }
       };
       break;
-    case "submit_donation":
-      result = {
-        ok: true,
-        match: {
-          ...matchForAction,
-          gameLog: [...matchForAction.gameLog, createLog(matchForAction.turnNumber, "Donation submitted")]
-        }
-      };
-      break;
+    }
     case "break_peace":
       result = applyBreakPeace(matchForAction, actingPlayerId, action.toPlayerId);
       break;
