@@ -817,25 +817,45 @@ const applyEndTurn = (match: MatchState): ActionResult => {
   return { ok: true, match: next };
 };
 
+// ── AI helper: score a tech node by the combat value of the unit it unlocks ──
+const scoreTechNode = (tech: { cost: number; unlockedUnitType: string }, difficulty: AIDifficulty): number => {
+  const stats = UNIT_STATS[tech.unlockedUnitType as UnitType];
+  if (!stats) return tech.cost; // fallback to cost for nodes without a unit
+  // Weighted combat value: damage, health, range, and mobility all matter
+  let score = stats.damage * 22 + stats.maxHealth * 14 + stats.attackRange * 18 + stats.movementRange * 6;
+  // Hard AI gets extra incentive to rush the tank upgrade path (strongest ground unit)
+  if (difficulty === "hard") {
+    const TANK_PATH: UnitType[] = ["strong_soldier", "machine_gunner", "mortar", "tank"];
+    const pathIndex = TANK_PATH.indexOf(stats.type);
+    if (pathIndex >= 0) {
+      // Deeper nodes on the path get a larger bonus (tank gets +120, mortar +80, etc.)
+      score += 30 + pathIndex * 30;
+    }
+  }
+  return score;
+};
+
 // ── AI helper: pick the best affordable tech node with all prerequisites met ──
-const pickBestAvailableTechForAI = (player: { gold: number; unlockedTechIds: TechNodeId[] }) => {
+const pickBestAvailableTechForAI = (player: { gold: number; unlockedTechIds: TechNodeId[] }, difficulty: AIDifficulty = "normal") => {
+  // Hard AI is willing to spend down to near-zero gold on a key tech unlock;
+  // easier difficulties keep a larger reserve so they can still produce units.
+  const minGoldReserve = difficulty === "hard" ? 15 : difficulty === "normal" ? 25 : UNIT_STATS.basic_soldier.productionCost;
   const available = Object.values(TECH_BY_ID).filter((tech) => {
     if (player.unlockedTechIds.includes(tech.id as TechNodeId)) return false;
     if (!tech.prerequisites.every((prereq) => player.unlockedTechIds.includes(prereq as TechNodeId))) return false;
-    return player.gold >= tech.cost;
+    return player.gold - tech.cost >= minGoldReserve;
   });
   if (available.length === 0) return null;
-  return available.sort((a, b) => b.cost - a.cost)[0]!;
+  return available.sort((a, b) => scoreTechNode(b, difficulty) - scoreTechNode(a, difficulty))[0]!;
 };
 
 // ── AI helper: try to unlock the best available tech node ────────────────────
 const maybeUnlockTechForAI = (match: MatchState, aiPlayerId: string): MatchState => {
   const aiPlayer = match.players.find((p) => p.id === aiPlayerId);
   if (!aiPlayer) return match;
-  const tech = pickBestAvailableTechForAI(aiPlayer);
+  // Gold reserve is encoded inside pickBestAvailableTechForAI per difficulty
+  const tech = pickBestAvailableTechForAI(aiPlayer, match.aiDifficulty);
   if (!tech) return match;
-  // Keep at least enough gold to produce a basic soldier after unlocking
-  if (aiPlayer.gold - tech.cost < UNIT_STATS.basic_soldier.productionCost) return match;
   const result = applyUnlockTech(match, aiPlayerId, tech.id);
   return result.ok ? result.match : match;
 };
@@ -982,12 +1002,19 @@ const chooseAIUnitTypeToProduce = (
   const frontlineTypes: UnitType[] = ["tank", "warrior", "strong_soldier"];
   const frontlineCount = ownedUnits.filter((u) => frontlineTypes.includes(u.type)).length;
   const patriotCount = ownedUnits.filter((u) => u.type === "patriot").length;
-  const targetFrontline = Math.max(1, Math.round(totalArmy * 0.55));
-  const targetPatriot = totalArmy > 2 ? Math.round(totalArmy * 0.35) : 0;
-  const tankCost = UNIT_STATS.tank.productionCost;
+  // Hard AI builds a more offensive army (65% frontline, 25% defensive)
+  const frontlineRatio = difficulty === "hard" ? 0.65 : 0.55;
+  const patriotRatio = difficulty === "hard" ? 0.25 : 0.35;
+  const targetFrontline = Math.max(1, Math.round(totalArmy * frontlineRatio));
+  const targetPatriot = totalArmy > 2 ? Math.round(totalArmy * patriotRatio) : 0;
 
+  // Emergency: protect capital when heavily threatened
   if (capitalThreat > 3 && unlocked.includes("patriot") && patriotCount < totalArmy * 0.5) return "patriot";
-  if (player.gold >= tankCost * 2 && unlocked.includes("tank")) return "tank";
+  // Hard AI: always build tanks once minimum patriot coverage is in place
+  if (difficulty === "hard" && unlocked.includes("tank") &&
+      (patriotCount >= Math.floor(totalArmy * 0.2) || !unlocked.includes("patriot"))) return "tank";
+  // Normal/easy: produce tank only when flush with gold
+  if (player.gold >= UNIT_STATS.tank.productionCost * 2 && unlocked.includes("tank")) return "tank";
   if (patriotCount < targetPatriot && unlocked.includes("patriot")) return "patriot";
   if (frontlineCount < targetFrontline) {
     for (const type of ["tank", "warrior", "strong_soldier"] as UnitType[]) {
@@ -995,6 +1022,8 @@ const chooseAIUnitTypeToProduce = (
     }
   }
   if ((strategicMode === "Defense" || strategicMode === "Desperation") && unlocked.includes("patriot")) return "patriot";
+  // Hard AI fallback: prefer tanks over random expensive units (e.g. aircraft)
+  if (difficulty === "hard" && unlocked.includes("tank")) return "tank";
   if (difficulty === "easy") return unlocked.sort((a, b) => UNIT_STATS[a].productionCost - UNIT_STATS[b].productionCost)[0]!;
   return unlocked.sort((a, b) => UNIT_STATS[b].productionCost - UNIT_STATS[a].productionCost)[0]!;
 };
@@ -1255,15 +1284,18 @@ export const runAISteps = (input: MatchState): MatchState => {
       }
     }
 
-    // ── 6. Unlock tech (up to 2 nodes per turn) ──────────────────────────────
-    for (let t = 0; t < 2; t += 1) {
+    // ── 6. Unlock tech (hard: up to 3 nodes per turn; others: up to 2) ───────
+    const maxTechUnlocks = match.aiDifficulty === "hard" ? 3 : 2;
+    for (let t = 0; t < maxTechUnlocks; t += 1) {
       const prev = match;
       match = maybeUnlockTechForAI(match, aiPlayerId);
       if (match === prev) break;
     }
 
     // ── 7. Produce units until army target is reached or gold runs out ───────
-    const maxProductions = Math.max(1, desiredArmy - currentArmy + 1);
+    // Hard AI always attempts at least 4 productions to avoid hoarding gold.
+    const hardBonus = match.aiDifficulty === "hard" ? 3 : 0;
+    const maxProductions = Math.max(1 + hardBonus, desiredArmy - currentArmy + 1 + hardBonus);
     for (let p = 0; p < maxProductions; p += 1) {
       const prev = match;
       match = maybeProduceForAI(match, aiPlayerId, strategicMode);

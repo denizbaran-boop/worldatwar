@@ -58,13 +58,13 @@ const DIFFICULTY_BIASES: Record<AIDifficulty, {
 }> = {
   easy: { aggression: 0.7, expansion: 0.8, villagePriority: 1.0, minePriority: 0.85, desiredArmyBonus: 0 },
   normal: { aggression: 1.0, expansion: 1.0, villagePriority: 1.2, minePriority: 1.1, desiredArmyBonus: 1 },
-  hard: { aggression: 1.35, expansion: 1.2, villagePriority: 1.5, minePriority: 1.35, desiredArmyBonus: 3 }
+  hard: { aggression: 1.7, expansion: 1.4, villagePriority: 2.0, minePriority: 1.7, desiredArmyBonus: 5 }
 };
 
 const MIN_CAPITAL_DEFENDERS: Record<AIDifficulty, number> = {
   easy: 1,
   normal: 2,
-  hard: 3
+  hard: 4
 };
 
 const DEFENSE_RADIUS = 2;
@@ -379,7 +379,7 @@ function assignRoles(
   const threat = computeCapitalThreat(capitalTile, enemyUnits, tileMap);
   const threatBonus = difficulty === "easy" ? 0
     : difficulty === "normal" ? (threat > 3 ? 1 : 0)
-    : (threat > 2 ? Math.min(2, Math.floor(threat / 2)) : 0);
+    : Math.min(3, Math.floor(threat / 1.5)); // hard: more defenders, reacts at lower threat levels
   const requiredDefenders = MIN_CAPITAL_DEFENDERS[difficulty] + threatBonus;
 
   for (const unit of actorUnits) {
@@ -490,10 +490,10 @@ export const chooseAIMove = (snapshot: Snapshot): AITurnChoice | null => {
       const targetVillage = villageByTile.get(tile.key) ?? null;
 
       if (tile.isCapital && tile.ownerId && tile.ownerId !== snapshot.playerId && !arePeacePartners(snapshot.peaceTreaties, snapshot.playerId, tile.ownerId)) {
-        score += 280 * bias.aggression;
+        score += (snapshot.difficulty === "hard" ? 360 : 280) * bias.aggression;
       }
       if (targetVillage && targetVillage.ownerId !== snapshot.playerId && !arePeacePartners(snapshot.peaceTreaties, snapshot.playerId, targetVillage.ownerId ?? "")) {
-        score += 110 * bias.villagePriority;
+        score += (snapshot.difficulty === "hard" ? 150 : 110) * bias.villagePriority;
       }
       if (tile.ownerId === null) {
         score += 20 * bias.expansion;
@@ -521,13 +521,15 @@ export const chooseAIMove = (snapshot: Snapshot): AITurnChoice | null => {
         if (explorationDist < Infinity) score += Math.max(0, 12 - explorationDist * 3);
         if (tile.ownerId === null) score += 15;
       } else if (role === "frontline") {
+        const isHard = snapshot.difficulty === "hard";
         for (const enemy of enemyUnits) {
           const enemyTile = tileMap.get(enemy.tileKey);
           if (!enemyTile) continue;
           const attackDist = axialDistance(tile, enemyTile);
           if (attackDist > 0 && attackDist <= stats.attackRange && canUnitAttackTarget(unit, enemy)) {
-            score += enemy.health <= stats.damage ? 140 : 75;
-            if (enemyTile.isCapital) score += 50;
+            score += enemy.health <= stats.damage ? (isHard ? 220 : 140) : (isHard ? 110 : 75);
+            if (enemyTile.isCapital) score += isHard ? 80 : 50;
+            if (enemyTile.villageId) score += isHard ? 45 : 25;
           }
         }
         if (visibleBorderTiles.length > 0) {
@@ -550,13 +552,17 @@ export const chooseAIMove = (snapshot: Snapshot): AITurnChoice | null => {
       }
 
       if (mode === "Defense" || mode === "Desperation") {
-        if (capitalTile) score -= axialDistance(tile, capitalTile) * 4;
+        if (capitalTile) {
+          const pullMult = snapshot.difficulty === "hard" ? 7 : 4;
+          score -= axialDistance(tile, capitalTile) * pullMult;
+        }
       }
 
       consider(unit.id, tile.key, score);
     }
 
     if (role !== "scout") {
+      const isHard = snapshot.difficulty === "hard";
       for (const enemy of enemyUnits) {
         const enemyTile = tileMap.get(enemy.tileKey);
         if (!enemyTile) continue;
@@ -565,9 +571,10 @@ export const chooseAIMove = (snapshot: Snapshot): AITurnChoice | null => {
         if (!canUnitAttackTarget(unit, enemy)) continue;
 
         let score = 390 * bias.aggression;
-        if (enemy.health <= stats.damage) score += 240;
-        if (enemyTile.isCapital) score += 90;
-        if (enemyTile.villageId) score += 35;
+        if (enemy.health <= stats.damage) score += isHard ? 340 : 240;
+        if (enemyTile.isCapital) score += isHard ? 150 : 90;
+        if (enemyTile.villageId) score += isHard ? 60 : 35;
+        if (enemyTile.hasGoldMine) score += isHard ? 50 : 20;
         if (mode === "Desperation" && capitalTile) {
           score += Math.max(0, 8 - axialDistance(enemyTile, capitalTile)) * 16;
         }
