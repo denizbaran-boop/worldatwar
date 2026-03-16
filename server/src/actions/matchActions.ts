@@ -3,7 +3,7 @@ import { chooseAIMove, computeCapitalThreat, evaluateStrategicMode, evaluateDesi
 import { canUnitAttackTarget, resolveUnitCombat } from "../game/combatSystem";
 import { getDiplomacyPairKey, shouldAcceptPeaceOffer, shouldSendPeaceOffer, updatePeaceMemories } from "../game/diplomacy";
 import { applyTurnIncome, calculateTurnIncome } from "../game/economySystem";
-import { createInitialFog, discoverTileAndNeighborsOnMap, revealAroundAllUnits } from "../game/fogOfWar";
+import { createInitialFog, discoverTileAndNeighborsOnMap, discoverTileKeys, revealAroundAllUnits } from "../game/fogOfWar";
 import { axialDistance, getNeighborKeys } from "../game/map";
 import { TECH_BY_ID } from "../game/techTree";
 import { UNIT_PROGRESSION, UNIT_STATS } from "../game/unitSystem";
@@ -28,6 +28,16 @@ const getFactionPairKey = (a: string, b: string) => [a, b].sort().join(":");
 
 const arePeacePartners = (treaties: PeaceTreaty[], a: string, b: string) =>
   treaties.some((t) => (t.playerA === a && t.playerB === b) || (t.playerA === b && t.playerB === a));
+
+// Mutually reveal all owned tiles when a peace treaty is signed
+const revealTerritoryOnPeace = (fog: FogOfWarState, tiles: Tile[], playerA: string, playerB: string): FogOfWarState => {
+  const aTiles = tiles.filter((t) => t.ownerId === playerA).map((t) => t.key);
+  const bTiles = tiles.filter((t) => t.ownerId === playerB).map((t) => t.key);
+  let next = fog;
+  if (bTiles.length > 0) next = discoverTileKeys(next, playerA, bTiles);
+  if (aTiles.length > 0) next = discoverTileKeys(next, playerB, aTiles);
+  return next;
+};
 
 const recordPeaceOffer = (memories: Record<string, PeacePairMemory>, from: string, to: string, turn: number) => {
   const key = getDiplomacyPairKey(from, to);
@@ -636,12 +646,18 @@ const applyRespondPeace = (match: MatchState, actingPlayerId: string, accept: bo
     ? match.peaceMemories
     : recordPeaceRejection(match.peaceMemories, offer.fromPlayerId, offer.toPlayerId, match.turnNumber);
 
+  const nextExploredTiles = accept && !hasTreaty
+    ? revealTerritoryOnPeace(match.exploredTiles, match.map.tiles, offer.fromPlayerId, offer.toPlayerId)
+    : match.exploredTiles;
+
   return {
     ok: true,
     match: {
       ...match,
       peaceTreaties: nextPeaceTreaties,
       peaceMemories: nextMemories,
+      exploredTiles: nextExploredTiles,
+      fogOfWar: nextExploredTiles,
       outgoingTreaty: null,
       pendingPeaceTreaty: null,
       pendingTreatyResult: null,
@@ -1202,11 +1218,16 @@ export const runAISteps = (input: MatchState): MatchState => {
           const outcomeText = resolution.accepted
             ? `${fromColor} and ${toColor} agreed to a peace treaty`
             : `${toColor} refused ${fromColor}'s peace offer`;
+          const nextExploredAfterPeace = resolution.accepted
+            ? revealTerritoryOnPeace(match.exploredTiles, match.map.tiles, aiPlayerId, enemy.id)
+            : match.exploredTiles;
           match = {
             ...match,
             peaceTreaties: resolution.accepted
               ? [...match.peaceTreaties, { playerA: aiPlayerId, playerB: enemy.id }]
               : match.peaceTreaties,
+            exploredTiles: nextExploredAfterPeace,
+            fogOfWar: nextExploredAfterPeace,
             peaceMemories: updatedMemories,
             gameLog: [...match.gameLog, createLog(match.turnNumber, outcomeText, resolution.accepted ? fromColor : toColor)],
             diplomacyLog: [...match.diplomacyLog, createLog(match.turnNumber, outcomeText, resolution.accepted ? fromColor : toColor)]
