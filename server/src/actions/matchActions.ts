@@ -818,9 +818,10 @@ const applyEndTurn = (match: MatchState): ActionResult => {
 };
 
 // ── AI helper: score a tech node by the combat value of the unit it unlocks ──
-const scoreTechNode = (tech: { cost: number; unlockedUnitType: string }, difficulty: AIDifficulty): number => {
+const scoreTechNode = (tech: { cost: number; unlockedUnitType: string | null }, difficulty: AIDifficulty): number => {
+  if (!tech.unlockedUnitType) return tech.cost; // no unit unlocked — fall back to raw cost
   const stats = UNIT_STATS[tech.unlockedUnitType as UnitType];
-  if (!stats) return tech.cost; // fallback to cost for nodes without a unit
+  if (!stats) return tech.cost;
   // Weighted combat value: damage, health, range, and mobility all matter
   let score = stats.damage * 22 + stats.maxHealth * 14 + stats.attackRange * 18 + stats.movementRange * 6;
   // Hard AI gets extra incentive to rush the tank upgrade path (strongest ground unit)
