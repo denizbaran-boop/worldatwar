@@ -183,16 +183,28 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
   const visibleForPlayer = match.visibleTiles[gamePlayerId] ?? {};
   const exploredForPlayer = match.exploredTiles[gamePlayerId] ?? {};
 
+  // Merge peace allies' explored tiles into the player's visible set
+  const allyIds = match.peaceTreaties
+    .filter((t) => t.playerA === gamePlayerId || t.playerB === gamePlayerId)
+    .map((t) => (t.playerA === gamePlayerId ? t.playerB : t.playerA));
+  const mergedExplored: Record<string, boolean> = { ...exploredForPlayer };
+  for (const allyId of allyIds) {
+    const allyFog = match.exploredTiles[allyId] ?? {};
+    for (const key of Object.keys(allyFog)) {
+      mergedExplored[key] = true;
+    }
+  }
+
   const filteredTiles = match.map.tiles.map((tile) =>
-    applyFogFilterToTile(tile, Boolean(exploredForPlayer[tile.key]))
+    applyFogFilterToTile(tile, Boolean(mergedExplored[tile.key]))
   );
 
   const filteredUnits = match.units.filter((unit) => {
     if (unit.ownerId === gamePlayerId) return true;
-    return Boolean(exploredForPlayer[unit.tileKey]);
+    return Boolean(mergedExplored[unit.tileKey]);
   });
 
-  const filteredVillages = filterVillagesForPerspective(match.villages, exploredForPlayer);
+  const filteredVillages = filterVillagesForPerspective(match.villages, mergedExplored);
   const contactedPlayerIds = match.contactedPlayerIdsByPlayer[gamePlayerId] ?? [];
   const firstContactNotification = match.firstContactNotificationByPlayer[gamePlayerId] ?? null;
   const pendingOffer = match.pendingPeaceTreaty;
@@ -210,13 +222,13 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
     villages: filteredVillages,
     units: filteredUnits,
     exploredTiles: {
-      [gamePlayerId]: exploredForPlayer
+      [gamePlayerId]: mergedExplored
     },
     visibleTiles: {
       [gamePlayerId]: visibleForPlayer
     },
     fogOfWar: {
-      [gamePlayerId]: exploredForPlayer
+      [gamePlayerId]: mergedExplored
     },
     contactedPlayerIdsByPlayer: {
       [gamePlayerId]: contactedPlayerIds

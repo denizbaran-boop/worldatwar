@@ -29,7 +29,7 @@ export function WorldMap() {
     originY: 0
   });
 
-  const { tiles, units, players, selectedTileKey, hoveredTileKey, fogOfWar, currentPlayerId, humanPlayerId } = useGameStore(
+  const { tiles, units, players, selectedTileKey, hoveredTileKey, fogOfWar, currentPlayerId, humanPlayerId, peaceTreaties } = useGameStore(
     useShallow((state) => ({
       tiles: state.tiles,
       units: state.units,
@@ -38,7 +38,8 @@ export function WorldMap() {
       hoveredTileKey: state.hoveredTileKey,
       fogOfWar: state.fogOfWar,
       currentPlayerId: state.currentPlayerId,
-      humanPlayerId: state.humanPlayerId
+      humanPlayerId: state.humanPlayerId,
+      peaceTreaties: state.peaceTreaties
     }))
   );
 
@@ -50,7 +51,13 @@ export function WorldMap() {
     const tile = tiles.find((entry) => entry.key === inspectedTileKey);
     if (!tile) return null;
 
-    const discovered = Boolean(fogOfWar[perspectiveId]?.[tile.key]);
+    const allyIds = peaceTreaties
+      .filter((t) => t.playerA === perspectiveId || t.playerB === perspectiveId)
+      .map((t) => (t.playerA === perspectiveId ? t.playerB : t.playerA));
+    const discovered = Boolean(
+      fogOfWar[perspectiveId]?.[tile.key] ||
+      allyIds.some((allyId) => fogOfWar[allyId]?.[tile.key])
+    );
     if (!discovered) {
       return {
         coord: `${tile.q},${tile.r}`,
@@ -72,7 +79,7 @@ export function WorldMap() {
       unitMoved: unit ? (unit.hasMovedThisTurn ? "Yes" : "No") : "-",
       unitHealth: unit ? `${unit.health}/${UNIT_STATS[unit.type].maxHealth}` : "-"
     };
-  }, [perspectiveId, fogOfWar, inspectedTileKey, players, tiles, units]);
+  }, [perspectiveId, fogOfWar, inspectedTileKey, players, tiles, units, peaceTreaties]);
 
   // Attach a non-passive wheel listener so preventDefault() actually blocks page scroll.
   // React's synthetic onWheel is passive by default and cannot prevent scrolling.

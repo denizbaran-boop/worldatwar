@@ -143,7 +143,7 @@ export function GameBoard({ suppressClicks = false }: Props) {
   const unitsByTile = useMemo(() => new Map(units.map((unit) => [unit.tileKey, unit])), [units]);
   const selectedUnit = useMemo(() => units.find((unit) => unit.id === selectedUnitId) ?? null, [units, selectedUnitId]);
 
-  // Peace allies' owned tiles are always visible (revealed by alliance)
+  // Peace allies - used for movement/attack checks
   const peaceAllyIds = useMemo(() => {
     if (!perspectiveId) return new Set<string>();
     return new Set(
@@ -152,6 +152,19 @@ export function GameBoard({ suppressClicks = false }: Props) {
         .map((t) => (t.playerA === perspectiveId ? t.playerB : t.playerA))
     );
   }, [peaceTreaties, perspectiveId]);
+
+  // Peace allies share full discovered fog with each other
+  const peaceAllyDiscoveredKeys = useMemo(() => {
+    if (peaceAllyIds.size === 0) return new Set<string>();
+    const keys = new Set<string>();
+    for (const allyId of peaceAllyIds) {
+      const allyFog = fogOfWar[allyId] ?? {};
+      for (const key of Object.keys(allyFog)) {
+        keys.add(key);
+      }
+    }
+    return keys;
+  }, [peaceAllyIds, fogOfWar]);
 
   const points = useMemo(() => {
     const raw = tiles.map((tile) => {
@@ -459,7 +472,7 @@ export function GameBoard({ suppressClicks = false }: Props) {
           const discovered = Boolean(
             perspectiveId && (
               fogOfWar[perspectiveId]?.[tile.key] ||
-              (tile.ownerId && peaceAllyIds.has(tile.ownerId))
+              peaceAllyDiscoveredKeys.has(tile.key)
             )
           );
           const selected = selectedTileKey === tile.key;
