@@ -306,6 +306,19 @@ io.on("connection", (socket) => {
     if (m?.roomCode && m?.playerId) {
       const updatedRoom = markDisconnected(m.roomCode, m.playerId);
       if (updatedRoom) {
+        // If this was an active match and no human players remain connected,
+        // destroy the match and remove the player from the room so that
+        // a future "Create Game" never reconnects to this abandoned session.
+        const match = getMatch(m.roomCode);
+        const hasConnectedHuman = updatedRoom.players.some(
+          (p) => p.connectionStatus === "connected"
+        );
+        if (match && match.phase === "in_game" && !hasConnectedHuman) {
+          removeMatch(m.roomCode);
+          leaveRoom(m.roomCode, m.playerId); // empties and deletes the room
+          return; // room is gone; nothing left to broadcast
+        }
+
         broadcastRoomUpdate(m.roomCode, updatedRoom);
       }
     }

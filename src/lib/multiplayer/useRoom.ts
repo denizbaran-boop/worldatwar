@@ -152,6 +152,13 @@ export function useRoom(): RoomHookState & RoomHookActions {
       setError(err);
     };
 
+    // Server destroyed the match (e.g. all humans disconnected from an AI game).
+    // Clear the stale room code so we never loop back into the dead session.
+    const onReconnectFailed = () => {
+      saveStoredPlayer({ activeRoomCode: undefined });
+      setRoom(null);
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("room:created", onRoomCreated);
@@ -161,6 +168,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
     socket.on("room:started", onRoomStarted);
     socket.on("room:left", onRoomLeft);
     socket.on("room:error", onRoomError);
+    socket.on("room:reconnect_failed", onReconnectFailed);
 
     if (socket.connected) {
       onConnect();
@@ -178,6 +186,7 @@ export function useRoom(): RoomHookState & RoomHookActions {
       socket.off("room:started", onRoomStarted);
       socket.off("room:left", onRoomLeft);
       socket.off("room:error", onRoomError);
+      socket.off("room:reconnect_failed", onReconnectFailed);
     };
   }, [localPlayerId]);
 
