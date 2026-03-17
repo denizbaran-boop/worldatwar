@@ -402,7 +402,7 @@ export function GamePageClient() {
         </section>
 
         <aside>
-          <GameLog logs={logs} players={players} contactedPlayerIds={contactedPlayerIds} humanPlayerId={humanPlayerId} />
+          <GameLog logs={logs} players={players} contactedPlayerIds={contactedPlayerIds} humanPlayerId={humanPlayerId} currentTurn={turnNumber} />
         </aside>
       </div>
 
