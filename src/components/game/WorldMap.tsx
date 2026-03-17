@@ -157,6 +157,23 @@ export function WorldMap() {
 
   const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 
+  const zoomToCenter = (delta: number) => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    setZoom((currentZoom) => {
+      const nextZoom = clampZoom(currentZoom + delta);
+      if (nextZoom === currentZoom) return currentZoom;
+      setPan((currentPan) => ({
+        x: cx - ((cx - currentPan.x) / currentZoom) * nextZoom,
+        y: cy - ((cy - currentPan.y) / currentZoom) * nextZoom
+      }));
+      return nextZoom;
+    });
+  };
+
   return (
     <Card className="relative overflow-hidden p-0">
       <div className="relative h-[68vh] min-h-[560px] w-full overflow-hidden" style={{ background: "#020610" }}>
@@ -191,11 +208,11 @@ export function WorldMap() {
         </div>
 
         <div className="absolute right-3 top-3 flex items-center gap-2 rounded-md border border-border bg-panel/90 px-2 py-2">
-          <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => setZoom((current) => clampZoom(Number((current - 0.1).toFixed(2))))}>
+          <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => zoomToCenter(-0.15)}>
             {t.worldMap.zoomOut}
           </Button>
           <span className="min-w-12 text-center text-xs text-slate-300">{Math.round(zoom * 100)}%</span>
-          <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => setZoom((current) => clampZoom(Number((current + 0.1).toFixed(2))))}>
+          <Button variant="secondary" className="px-3 py-1 text-xs" onClick={() => zoomToCenter(0.15)}>
             {t.worldMap.zoomIn}
           </Button>
         </div>
