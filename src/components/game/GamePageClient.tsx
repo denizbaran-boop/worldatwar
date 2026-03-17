@@ -203,6 +203,18 @@ export function GamePageClient() {
       ...(nextDiplomaticMsg ? { diplomaticNotification: nextDiplomaticMsg } : {}),
       ...(nextReinforcementNotif ? { reinforcementNotification: nextReinforcementNotif } : {})
     }));
+
+    // Show fog movement warning ("!") for tiles hidden from this player
+    const localHiddenTileKeys = localGamePlayerId
+      ? (match.hiddenMoveTileKeys?.[localGamePlayerId] ?? [])
+      : [];
+    if (localHiddenTileKeys.length > 0) {
+      useGameStore.setState({ hiddenMoveTileKeys: localHiddenTileKeys });
+      if (hiddenMoveTimeoutRef.current) clearTimeout(hiddenMoveTimeoutRef.current);
+      hiddenMoveTimeoutRef.current = window.setTimeout(() => {
+        useGameStore.setState({ hiddenMoveTileKeys: [] });
+      }, 2000);
+    }
   }, [localPlayerId, match, multiplayerEnabled]);
 
   useEffect(() => {
@@ -323,6 +335,7 @@ export function GamePageClient() {
   }, [aiTurnInProgress, currentPlayerIsAI, gameOver, multiplayerEnabled, runAITurn, setup.matchInitialized]);
 
   const prevMatchStateRef = useRef<MatchState | null>(null);
+  const hiddenMoveTimeoutRef = useRef<number | null>(null);
 
   const contactDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {

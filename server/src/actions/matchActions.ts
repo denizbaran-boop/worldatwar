@@ -471,6 +471,15 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     }
   }
 
+  // Compute which tiles are hidden from each observer player (not yet explored before this action)
+  const hiddenMoveTileKeys: Record<string, string[]> = {};
+  for (const [playerId, exploredForPlayer] of Object.entries(match.exploredTiles)) {
+    if (playerId === actingPlayerId) continue;
+    if (!(exploredForPlayer as Record<string, boolean>)[targetTile.key]) {
+      hiddenMoveTileKeys[playerId] = [targetTile.key];
+    }
+  }
+
   let next = {
     ...match,
     map: { ...match.map, tiles: nextTiles },
@@ -479,7 +488,8 @@ const applyUnitAction = (match: MatchState, actingPlayerId: string, unitId: stri
     exploredTiles: nextExplored,
     fogOfWar: nextExplored,
     lastCombatTurnByPair: nextLastCombatTurnByPair,
-    gameLog: nextLogs
+    gameLog: nextLogs,
+    hiddenMoveTileKeys
   };
 
   if (capturedCapitalOwnerId && !movingIntoPeaceTerritory) {
@@ -1346,7 +1356,7 @@ export const runAISteps = (input: MatchState): MatchState => {
 };
 
 export const applyGameAction = (match: MatchState, actingPlayerId: string, action: GameAction): ActionResult => {
-  const matchForAction = clearFirstContactNotifications(match);
+  const matchForAction = { ...clearFirstContactNotifications(match), hiddenMoveTileKeys: {} };
 
   if (action.type === "surrender") {
     const result = applySurrender(matchForAction, actingPlayerId);

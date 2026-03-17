@@ -150,6 +150,7 @@ export const createMatchForRoom = (room: GameRoom, hostId: string): MatchResult 
     reinforcementRequest: null,
     reinforcementCooldowns: {},
     unitDonorColors: {},
+    hiddenMoveTileKeys: {},
     gameLog: [createLog(1, "Match started")],
     diplomacyLog: [],
     aiPeaceDebugLog: [],
@@ -239,7 +240,10 @@ export const getPerspectiveState = (match: MatchState, lobbyPlayerId: string): M
     contactedPlayerIds,
     firstContactNotification,
     outgoingTreaty,
-    pendingPeaceTreaty
+    pendingPeaceTreaty,
+    hiddenMoveTileKeys: {
+      [gamePlayerId]: match.hiddenMoveTileKeys[gamePlayerId] ?? []
+    }
   };
 };
 

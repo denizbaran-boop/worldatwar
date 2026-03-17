@@ -103,6 +103,7 @@ export type MatchState = {
   reinforcementRequest: ReinforcementRequest | null;
   reinforcementCooldowns: Record<string, number>;
   unitDonorColors: Record<string, PlayerColor>;
+  hiddenMoveTileKeys: Record<string, string[]>;
   gameLog: LogEntry[];
   diplomacyLog: LogEntry[];
   aiPeaceDebugLog: string[];

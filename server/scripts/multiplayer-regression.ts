@@ -65,6 +65,7 @@ function makeBaseMatch(input: {
     reinforcementRequest: null,
     reinforcementCooldowns: {},
     unitDonorColors: {},
+    hiddenMoveTileKeys: {},
     gameLog: [],
     diplomacyLog: [],
     aiPeaceDebugLog: [],

@@ -54,6 +54,8 @@ export type MatchState = {
   reinforcementRequest: ReinforcementRequest | null;
   reinforcementCooldowns: Record<string, number>;
   unitDonorColors: Record<string, PlayerColor>;
+  /** Transient: tile keys hidden from each observer player during the last unit action (cleared each action) */
+  hiddenMoveTileKeys: Record<string, string[]>;
   gameLog: LogEntry[];
   diplomacyLog: LogEntry[];
   aiPeaceDebugLog: string[];
