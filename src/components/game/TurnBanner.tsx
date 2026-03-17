@@ -7,10 +7,11 @@ import { useTranslation } from "@/lib/i18n/LanguageContext";
 
 type Props = {
   currentPlayer: Player | null;
+  displayName?: string;
   aiThinking?: boolean;
 };
 
-export function TurnBanner({ currentPlayer, aiThinking = false }: Props) {
+export function TurnBanner({ currentPlayer, displayName, aiThinking = false }: Props) {
   const { t } = useTranslation();
   return (
     <Card className="p-4">
@@ -21,7 +22,7 @@ export function TurnBanner({ currentPlayer, aiThinking = false }: Props) {
             className="inline-block h-3 w-3 rounded-full"
             style={{ backgroundColor: COLOR_HEX[currentPlayer.color], boxShadow: `0 0 10px ${COLOR_HEX[currentPlayer.color]}` }}
           />
-          <span className="text-base font-semibold text-slate-100 capitalize">{currentPlayer.color}</span>
+          <span className="text-base font-semibold text-slate-100 capitalize">{displayName ?? currentPlayer.color}</span>
           {aiThinking && <span className="text-xs uppercase tracking-wide text-cyan-300">{t.turnBanner.aiThinking}</span>}
         </div>
       )}

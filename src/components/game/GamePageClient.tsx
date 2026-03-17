@@ -25,7 +25,7 @@ import type { PlayerColor } from "@/lib/game/types";
 export function GamePageClient() {
   const router = useRouter();
   const { t } = useTranslation();
-  const { room, localPlayerId } = useRoom();
+  const { room, localPlayerId, localPlayerName } = useRoom();
   const multiplayerEnabled = Boolean(room && room.status === "in_game" && localPlayerId);
   const { match, syncing: matchSyncing, error: matchError, sendAction } = useMatch({
     roomCode: room?.code ?? null,
@@ -109,6 +109,22 @@ export function GamePageClient() {
   const humanEliminated = Boolean(humanPlayerId && humanPlayer && !humanPlayer.isAlive && !gameOver);
   const [watching, setWatching] = useState(false);
   const currentPlayerIsAI = Boolean(currentPlayerId && aiPlayerIds.includes(currentPlayerId));
+
+  // Resolve a human-readable name for the current player
+  const currentPlayerDisplayName = useMemo(() => {
+    if (!currentPlayer) return "";
+    // Local human player
+    if (currentPlayer.id === humanPlayerId && localPlayerName) return localPlayerName;
+    // Other human players in multiplayer — look up their lobby name
+    if (room && match) {
+      const lobbyId = match.playerAssignments[currentPlayer.id];
+      const lobbyPlayer = room.players.find((p) => p.id === lobbyId);
+      if (lobbyPlayer?.name) return lobbyPlayer.name;
+    }
+    // AI or unknown — fall back to color
+    return currentPlayer.color;
+  }, [currentPlayer, humanPlayerId, localPlayerName, match, room]);
+
   const multiplayerErrorText = useMemo(() => {
     if (!matchError) return null;
     if (matchError === "not_your_turn") return t.game.notYourTurn;
@@ -404,7 +420,7 @@ export function GamePageClient() {
     <main className="min-h-screen bg-[#050812] px-4 py-4">
       <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-4 xl:grid-cols-[300px_1fr_340px]">
         <aside className="space-y-4">
-          <TurnBanner currentPlayer={currentPlayer} aiThinking={currentPlayerIsAI && aiTurnInProgress} />
+          <TurnBanner currentPlayer={currentPlayer} displayName={currentPlayerDisplayName} aiThinking={currentPlayerIsAI && aiTurnInProgress} />
           <PlayerSidebar />
         </aside>
 
