@@ -398,7 +398,8 @@ export function GameBoard({ suppressClicks = false }: Props) {
             fromX: sourcePoint.x,
             fromY: sourcePoint.y,
             toX: targetPoint.x,
-            toY: targetPoint.y
+            toY: targetPoint.y,
+            isRanged: axialDistance(preview.sourceTile, preview.targetTile) > 1
           });
 
           await sleep(ATTACK_IMPACT_MS[preview.unit.type] ?? 220);

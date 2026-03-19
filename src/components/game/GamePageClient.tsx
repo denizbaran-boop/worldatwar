@@ -244,9 +244,10 @@ export function GamePageClient() {
         dispatch({ type: "unit_action", unitId, targetTileKey });
         return { ok: true };
       },
-      queueAnimatedUnitAction: (unitId, targetTileKey) => {
-        dispatch({ type: "unit_action", unitId, targetTileKey });
-      },
+      // queueAnimatedUnitAction intentionally NOT overridden:
+      // the original sets pendingAnimatedAction so GameBoard plays the full
+      // attack animation (including ranged explosions), then calls
+      // attemptUnitAction (overridden above) to dispatch to the server.
       unlockTech: (techId) => {
         dispatch({ type: "unlock_tech", techId });
         return { ok: true };
@@ -273,7 +274,6 @@ export function GamePageClient() {
     return () => {
       useGameStore.setState({
         attemptUnitAction: original.attemptUnitAction,
-        queueAnimatedUnitAction: original.queueAnimatedUnitAction,
         unlockTech: original.unlockTech,
         produceUnit: original.produceUnit,
         healUnit: original.healUnit,

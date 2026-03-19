@@ -9,6 +9,7 @@ export type AttackAnimEvent = {
   fromY: number;
   toX: number;
   toY: number;
+  isRanged?: boolean;
 };
 
 // How long each animation runs before the event is cleaned up (ms)
@@ -16,7 +17,7 @@ export const ANIM_CLEANUP_MS: Record<UnitType, number> = {
   basic_soldier: 400,
   strong_soldier: 550,
   warrior: 400,
-  machine_gunner: 750,
+  machine_gunner: 950,
   mortar: 1100,
   tank: 1050,
   aircraft: 600,
@@ -136,12 +137,20 @@ function WarriorAnim({ e }: { e: AttackAnimEvent }) {
 function MachineGunnerAnim({ e }: { e: AttackAnimEvent }) {
   const dx = e.toX - e.fromX;
   const dy = e.toY - e.fromY;
+  // Last bullet arrives at delay 0.32 + travel 0.13 = 0.45s — explosion starts then
+  const explosionBegin = 0.44;
   return (
     <g>
       {[0, 0.1, 0.2, 0.32].map((delay, i) => (
         <Bullet key={i} fromX={e.fromX} fromY={e.fromY} dx={dx} dy={dy}
           color="#fbbf24" size={2} travelDur={0.13} delay={delay} />
       ))}
+      {e.isRanged && (
+        <g transform={`translate(${e.fromX} ${e.fromY})`}>
+          <Explosion cx={dx} cy={dy} begin={explosionBegin} maxR={12}
+            ringColor="#f59e0b" flashColor="#fef08a" />
+        </g>
+      )}
     </g>
   );
 }
