@@ -109,6 +109,8 @@ const en = {
     ready: "Ready",
     needGold: "Need Gold",
     locked: "Locked",
+    tabUnits: "Units",
+    tabTree: "Tree",
   },
   techPanel: {
     title: "Research",
@@ -330,6 +332,8 @@ const tr: typeof en = {
     ready: "Hazır",
     needGold: "Altın Gerekli",
     locked: "Kilitli",
+    tabUnits: "Birimler",
+    tabTree: "Ağaç",
   },
   techPanel: {
     title: "Araştırma",
@@ -551,6 +555,8 @@ const es: typeof en = {
     ready: "Listo",
     needGold: "Necesitas Oro",
     locked: "Bloqueado",
+    tabUnits: "Unidades",
+    tabTree: "Árbol",
   },
   techPanel: {
     title: "Investigación",
@@ -772,6 +778,8 @@ const pt: typeof en = {
     ready: "Pronto",
     needGold: "Precisa de Ouro",
     locked: "Bloqueado",
+    tabUnits: "Unidades",
+    tabTree: "Árvore",
   },
   techPanel: {
     title: "Pesquisa",
@@ -993,6 +1001,8 @@ const de: typeof en = {
     ready: "Bereit",
     needGold: "Gold Benötigt",
     locked: "Gesperrt",
+    tabUnits: "Einheiten",
+    tabTree: "Baum",
   },
   techPanel: {
     title: "Forschung",
@@ -1214,6 +1224,8 @@ const ru: typeof en = {
     ready: "Готово",
     needGold: "Нужно золото",
     locked: "Заблокировано",
+    tabUnits: "Отряды",
+    tabTree: "Дерево",
   },
   techPanel: {
     title: "Исследования",

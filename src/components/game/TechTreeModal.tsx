@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { UNIT_IMAGE } from "@/lib/game/unitAssets";
 import { TECH_TREE_NODES, isTechAvailable } from "@/lib/game/techTree";
 import { UNIT_STATS } from "@/lib/game/unitSystem";
+import type { TechNodeId } from "@/lib/game/types";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useGameStore } from "@/store/gameStore";
@@ -45,10 +46,14 @@ const DEFAULT_ZOOM = 0.82;
 export function TechTreeModal() {
   const graphScrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef({ active: false, startX: 0, startY: 0, startScrollLeft: 0, startScrollTop: 0 });
+  const touchRef = useRef<{ startX: number; startY: number; startScrollLeft: number; startScrollTop: number } | null>(null);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [treeZoom, setTreeZoom] = useState(DEFAULT_ZOOM);
+  const [mobileTab, setMobileTab] = useState<"list" | "tree">("list");
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const { t } = useTranslation();
   const { open, toggleTechTree, player, unlockTech, gameOver, actionAnimationBusy } = useGameStore(
@@ -84,6 +89,19 @@ export function TechTreeModal() {
     });
   }, [player]);
 
+  // Shared unlock handler used by both tree nodes and list cards
+  const handleUnlock = useCallback((nodeId: TechNodeId, fromList = false) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node || gameOver || actionAnimationBusy || node.unlocked || !node.available || !node.affordable) return;
+    unlockTech(nodeId);
+    if (fromList) {
+      // Briefly highlight the corresponding node in the tree
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      setHighlightedId(nodeId);
+      highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 1500);
+    }
+  }, [nodes, gameOver, actionAnimationBusy, unlockTech]);
+
   // Center on basic soldier when opening
   useEffect(() => {
     if (!open || !graphScrollRef.current) return;
@@ -100,7 +118,7 @@ export function TechTreeModal() {
     pendingScrollRef.current = null;
   }, [treeZoom]);
 
-  // Drag-to-pan
+  // Mouse drag-to-pan
   useEffect(() => {
     if (!isDragging) return;
     const onMove = (e: MouseEvent) => {
@@ -114,6 +132,28 @@ export function TechTreeModal() {
     window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [isDragging]);
+
+  // Touch pan handlers for mobile tree
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1 || !graphScrollRef.current) return;
+    const touch = e.touches[0];
+    touchRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      startScrollLeft: graphScrollRef.current.scrollLeft,
+      startScrollTop: graphScrollRef.current.scrollTop,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchRef.current || e.touches.length !== 1 || !graphScrollRef.current) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    graphScrollRef.current.scrollLeft = touchRef.current.startScrollLeft - (touch.clientX - touchRef.current.startX);
+    graphScrollRef.current.scrollTop = touchRef.current.startScrollTop - (touch.clientY - touchRef.current.startY);
+  };
+
+  const handleTouchEnd = () => { touchRef.current = null; };
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -141,22 +181,50 @@ export function TechTreeModal() {
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-slate-800 bg-[#04070e]/95 px-6 py-4 backdrop-blur">
           <div className="flex items-center gap-4">
             <h3 className="text-xl font-bold text-white">{t.techTree.title}</h3>
-            <div className="flex items-center gap-3 text-xs text-slate-400">
+            <div className="hidden items-center gap-3 text-xs text-slate-400 sm:flex">
               <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.ground}} /> {t.techTree.ground}</span>
               <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.air}} /> {t.techTree.air}</span>
               <span className="flex items-center gap-1.5"><span className="h-2 w-5 rounded-full" style={{background: BRANCH_COLOR.defense}} /> {t.techTree.defense}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">{Math.round(treeZoom * 100)}%</span>
+            <span className="hidden text-xs text-slate-500 lg:inline">{Math.round(treeZoom * 100)}%</span>
             <span className="rounded-md border border-amber-400/45 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200">{t.techTree.goldLabel} {player.gold}</span>
             <Button variant="secondary" onClick={() => toggleTechTree(false)}>{t.techTree.close}</Button>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        {/* Mobile tab bar — only visible below lg */}
+        <div className="flex shrink-0 border-b border-slate-800 lg:hidden">
+          <button
+            onClick={() => setMobileTab("list")}
+            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+              mobileTab === "list"
+                ? "border-b-2 border-sky-400 text-sky-300"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {t.techTree.tabUnits}
+          </button>
+          <button
+            onClick={() => setMobileTab("tree")}
+            className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+              mobileTab === "tree"
+                ? "border-b-2 border-sky-400 text-sky-300"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {t.techTree.tabTree}
+          </button>
+        </div>
+
+        {/* Content area: flex-col on mobile (tab controls visibility), grid on desktop */}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px]">
+
           {/* Graph panel */}
-          <div className="flex min-h-0 flex-col rounded-xl border border-slate-800 bg-[radial-gradient(circle_at_center,#0f172a_0%,#020617_65%)] p-3">
+          <div className={`flex min-h-0 flex-col rounded-xl border border-slate-800 bg-[radial-gradient(circle_at_center,#0f172a_0%,#020617_65%)] p-3 ${
+            mobileTab !== "tree" ? "hidden lg:flex" : "flex-1"
+          }`}>
             <p className="mb-2 text-xs text-slate-400">{t.techTree.hint}</p>
             <div
               ref={graphScrollRef}
@@ -168,7 +236,11 @@ export function TechTreeModal() {
                   startScrollTop: graphScrollRef.current.scrollTop };
                 setIsDragging(true);
               }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
               onWheel={handleWheel}
+              style={{ touchAction: "none" }}
             >
               {/* Size adapter — makes the scrollable area match the scaled content */}
               <div style={{ width: GRAPH_WIDTH * treeZoom, height: GRAPH_HEIGHT * treeZoom, position: "relative", flexShrink: 0 }}>
@@ -187,13 +259,10 @@ export function TechTreeModal() {
                   {/* SVG layer: branch lines + labels */}
                   <svg viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`} className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
                     {/* Branch axis guides */}
-                    {/* Ground axis */}
                     <line x1={GRAPH_ORIGIN_X} y1={GRAPH_ORIGIN_Y} x2={GRAPH_WIDTH - 60} y2={GRAPH_ORIGIN_Y}
                       stroke={BRANCH_COLOR.ground} strokeOpacity="0.08" strokeWidth="80" />
-                    {/* Defense axis */}
                     <line x1={GRAPH_ORIGIN_X} y1={GRAPH_ORIGIN_Y} x2={60} y2={GRAPH_ORIGIN_Y}
                       stroke={BRANCH_COLOR.defense} strokeOpacity="0.08" strokeWidth="80" />
-                    {/* Air axis */}
                     <line x1={GRAPH_ORIGIN_X} y1={GRAPH_ORIGIN_Y} x2={GRAPH_ORIGIN_X} y2={60}
                       stroke={BRANCH_COLOR.air} strokeOpacity="0.08" strokeWidth="80" />
 
@@ -233,6 +302,7 @@ export function TechTreeModal() {
                   {/* Hex nodes */}
                   {nodes.map((node, index) => {
                     const branchColor = BRANCH_COLOR[node.branch] ?? "#e2e8f0";
+                    const isHighlighted = highlightedId === node.id;
 
                     const shellClass = node.unlocked
                       ? "from-emerald-300 via-emerald-500 to-emerald-800"
@@ -264,23 +334,29 @@ export function TechTreeModal() {
                           animation: "fadeNode 320ms ease forwards",
                           animationDelay: `${index * 55}ms`
                         }}
-                        onClick={() => {
-                          if (gameOver || actionAnimationBusy || node.unlocked || !node.available || !node.affordable) return;
-                          unlockTech(node.id);
-                        }}
+                        onClick={() => handleUnlock(node.id)}
                       >
-                        {/* Branch accent ring on center and branch-entry nodes */}
+                        {/* Highlight ring when navigated from list */}
+                        {isHighlighted && (
+                          <div
+                            className="absolute inset-[-4px] animate-ping rounded-full opacity-60"
+                            style={{ clipPath: HEX_CLIP_PATH, background: branchColor }}
+                          />
+                        )}
+                        {/* Branch accent ring */}
                         {(node.branch !== "center") && (
                           <div className="absolute inset-0 rounded-full opacity-20"
                             style={{ clipPath: HEX_CLIP_PATH, boxShadow: `inset 0 0 0 3px ${branchColor}` }} />
                         )}
                         <div
-                          className={`absolute inset-0 bg-gradient-to-br ${shellClass}`}
+                          className={`absolute inset-0 bg-gradient-to-br ${shellClass} ${isHighlighted ? "ring-2 ring-white/60" : ""}`}
                           style={{
                             clipPath: HEX_CLIP_PATH,
                             filter: node.unlocked
                               ? `drop-shadow(0 0 18px ${branchColor}44)`
-                              : "drop-shadow(0 14px 20px rgba(15,23,42,0.35))"
+                              : isHighlighted
+                                ? `drop-shadow(0 0 24px ${branchColor}99)`
+                                : "drop-shadow(0 14px 20px rgba(15,23,42,0.35))"
                           }}
                         />
                         <div
@@ -333,8 +409,10 @@ export function TechTreeModal() {
             </div>
           </div>
 
-          {/* Side panel */}
-          <div className="min-h-0 overflow-auto rounded-xl border border-slate-800 bg-[#020617]/80 p-3">
+          {/* Side / list panel */}
+          <div className={`overflow-auto rounded-xl border border-slate-800 bg-[#020617]/80 p-3 ${
+            mobileTab !== "list" ? "hidden lg:block lg:min-h-0" : "flex-1 min-h-0"
+          }`}>
             <div className="mb-3 rounded-lg border border-slate-700/70 bg-slate-900/60 p-3 text-xs text-slate-300">
               {t.techTree.branchInfo}
             </div>
@@ -349,41 +427,53 @@ export function TechTreeModal() {
                     <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</span>
                   </div>
                   <div className="grid grid-cols-1 gap-1.5">
-                    {branchNodes.map((node) => (
-                      <div
-                        key={`card-${node.id}`}
-                        className={`rounded-md border px-3 py-2.5 text-xs ${
-                          node.unlocked
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                            : node.available
-                              ? node.affordable
-                                ? "border-cyan-500/45 bg-cyan-500/10 text-cyan-100"
-                                : "border-amber-500/45 bg-amber-500/10 text-amber-100"
-                              : "border-slate-700 bg-slate-900/55 text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          {node.image ? (
-                            <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md">
-                              <Image src={node.image} alt={node.unitName} fill sizes="40px" className="object-cover" draggable={false} />
+                    {branchNodes.map((node) => {
+                      const canUnlock = !node.unlocked && node.available && node.affordable && !gameOver && !actionAnimationBusy;
+                      return (
+                        <button
+                          key={`card-${node.id}`}
+                          type="button"
+                          disabled={!canUnlock}
+                          onClick={() => handleUnlock(node.id, true)}
+                          className={`w-full rounded-md border px-3 py-3 text-xs text-left transition-all ${
+                            node.unlocked
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                              : node.available
+                                ? node.affordable
+                                  ? "border-cyan-500/45 bg-cyan-500/10 text-cyan-100 active:scale-[0.97] active:bg-cyan-500/20"
+                                  : "border-amber-500/45 bg-amber-500/10 text-amber-100"
+                                : "border-slate-700 bg-slate-900/55 text-slate-300"
+                          } ${canUnlock ? "cursor-pointer hover:brightness-110" : "cursor-default"}`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {node.image ? (
+                              <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md">
+                                <Image src={node.image} alt={node.unitName} fill sizes="44px" className="object-cover" draggable={false} />
+                              </div>
+                            ) : (
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-800 text-base">{node.icon}</div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold leading-tight">{node.name}</div>
+                              <div className="mt-0.5 flex items-center gap-2 text-[10px] opacity-75">
+                                <span>{node.cost}g</span>
+                                {node.damage !== null && <span className="text-red-300">⚔{node.damage}</span>}
+                                {node.maxHealth !== null && <span className="text-emerald-300">♥{node.maxHealth}</span>}
+                              </div>
                             </div>
-                          ) : (
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-800 text-base">{node.icon}</div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="font-semibold leading-tight">{node.name}</div>
-                            <div className="mt-0.5 flex items-center gap-2 text-[10px] opacity-75">
-                              <span>{node.cost}g</span>
-                              {node.damage !== null && <span className="text-red-300">⚔{node.damage}</span>}
-                              {node.maxHealth !== null && <span className="text-emerald-300">♥{node.maxHealth}</span>}
-                            </div>
+                            <span className="shrink-0 text-[11px] font-bold opacity-80">
+                              {node.unlocked ? "✓" : node.available ? (node.affordable ? "▶" : "✕") : "🔒"}
+                            </span>
                           </div>
-                          <span className="shrink-0 text-[9px] opacity-70">
-                            {node.unlocked ? "✓" : node.available ? (node.affordable ? "▶" : "✕") : "🔒"}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                          {/* Action hint for tappable cards on mobile */}
+                          {canUnlock && (
+                            <div className="mt-2 text-center text-[10px] font-semibold uppercase tracking-widest opacity-60">
+                              {t.techTree.ready} · tap to unlock
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
