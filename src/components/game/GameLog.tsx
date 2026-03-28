@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { COLOR_HEX } from "@/lib/game/constants";
 import type { LogEntry, Player, PlayerColor } from "@/lib/game/types";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
@@ -21,15 +20,9 @@ export function GameLog({ logs, players, contactedPlayerIds, humanPlayerId, curr
       .filter((p) => p.id !== humanPlayerId && !contactedPlayerIds.includes(p.id))
       .map((p) => p.color)
   );
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   // Only show entries for the current round
   const currentRoundLogs = logs.filter((log) => log.turn === currentTurn);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [currentRoundLogs.length]);
 
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 p-4">
@@ -37,7 +30,7 @@ export function GameLog({ logs, players, contactedPlayerIds, humanPlayerId, curr
         <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{t.log.round} {currentTurn}</p>
         <div className="h-px flex-1 bg-slate-800" />
       </div>
-      <div ref={scrollContainerRef} className="flex-1 space-y-1.5 overflow-auto pr-1">
+      <div className="flex-1 space-y-1.5 overflow-auto pr-1">
         {currentRoundLogs.length === 0 && (
           <p className="text-xs text-slate-700">{t.log.noActivity}</p>
         )}
@@ -60,7 +53,6 @@ export function GameLog({ logs, players, contactedPlayerIds, humanPlayerId, curr
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
